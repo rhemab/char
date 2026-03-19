@@ -21,6 +21,7 @@ pub enum Motion {
     UpperBack,
     NewLineBelow,
     NewLineAbove,
+    InsertMode,
     // Paste,
 }
 
@@ -112,11 +113,12 @@ impl Parser {
                 }
 
                 // check for action
+                if let Some(_action) = self.action_map.get(&c) {}
 
                 // check for leader keys
                 // then push to a buffer
                 // then check buffer against hashmap
-                if let Some(leader) = self.leader_keys.get(&c) {
+                if let Some(_leader) = self.leader_keys.get(&c) {
                     self.cmd_buffer.push(c);
                     if let Some(cmd) = self.global_cmd_map.get(&self.cmd_buffer) {
                         let command = Command {
@@ -165,6 +167,8 @@ fn generate_motion_map() -> HashMap<char, Motion> {
 
     map.insert('o', Motion::NewLineBelow);
     map.insert('O', Motion::NewLineAbove);
+
+    map.insert('i', Motion::InsertMode);
 
     map
 }

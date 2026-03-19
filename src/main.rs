@@ -45,7 +45,7 @@ struct CursorPos {
 enum Mode {
     Normal,
     Insert,
-    Visual,
+    // Visual,
     // VisualLine,
     // VisualBlock,
     Command,
@@ -183,6 +183,13 @@ impl App {
         // escape always return to normal from anywhere
         match (key_event.code, key_event.modifiers) {
             (KeyCode::Esc, _) | (KeyCode::Char('['), KeyModifiers::CONTROL) => {
+                match self.mode {
+                    Mode::Insert => {
+                        // if exiting insert mode, move cursor left 1
+                        self.cursor_pos.x = self.cursor_pos.x.saturating_sub(1);
+                    }
+                    _ => {}
+                }
                 self.return_to_normal_mode();
                 return;
             }
@@ -218,7 +225,7 @@ impl App {
                     // get range
                     let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
                     let mut range = (char_idx, char_idx);
-                    let mut cursor_target_idx = char_idx;
+                    let mut cursor_target_idx;
                     let mut count = 1;
                     if let Ok(n) = command.count.parse::<usize>() {
                         count = n;
@@ -237,6 +244,9 @@ impl App {
 
                     // check for motion
                     match command.motion {
+                        Some(Motion::InsertMode) => {
+                            self.mode = Mode::Insert;
+                        }
                         Some(Motion::Left) => {
                             range = (
                                 cursor_left_idx(&self.cursor_pos, count, &self.rope),
@@ -271,7 +281,7 @@ impl App {
                             self.update_cursor_from_char_idx(cursor_target_idx);
                         }
                         Some(Motion::Word) => {
-                            for i in 0..count {
+                            for _ in 0..count {
                                 range = (char_idx, next_word_idx(range.1, &self.rope));
                             }
                             cursor_target_idx = range.1;
@@ -279,10 +289,20 @@ impl App {
                             self.cursor_pos.preferred_x = self.cursor_pos.x;
                         }
                         Some(Motion::Back) => {
-                            for i in 0..count {
+                            for _ in 0..count {
                                 range = (back_word_idx(range.0, &self.rope), char_idx);
                             }
                             cursor_target_idx = range.0;
+                            self.update_cursor_from_char_idx(cursor_target_idx);
+                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                        }
+                        Some(Motion::FirstWord) => {
+                            eprintln!("cursor_pos: {:?}", self.cursor_pos);
+                            cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
+                            range = (
+                                char_idx.min(cursor_target_idx),
+                                char_idx.max(cursor_target_idx),
+                            );
                             self.update_cursor_from_char_idx(cursor_target_idx);
                             self.cursor_pos.preferred_x = self.cursor_pos.x;
                         }
@@ -309,8 +329,10 @@ impl App {
 
                     // match action & excecute on range
                     match command.action {
+                        Some(Action::Delete) => {}
+                        Some(Action::Change) => {}
                         _ => {
-                            eprintln!("cursor_pos: {:?}", self.cursor_pos);
+                            eprintln!("range: {:?}", range);
                         }
                     }
 
@@ -320,22 +342,24 @@ impl App {
                 // update command_bar line based on mode
                 match self.mode {
                     Mode::Insert => {
+                        self.parser.cmd_buffer.clear();
                         self.command_bar.clear();
                         self.command_bar.push_str("-- INSERT --");
                     }
-                    Mode::Visual => {
-                        self.command_bar.clear();
-                        self.command_bar.push_str("-- VISUAL --");
-                    }
+                    // Mode::Visual => {
+                    //     self.parser.cmd_buffer.clear();
+                    //     self.command_bar.clear();
+                    //     self.command_bar.push_str("-- VISUAL --");
+                    // }
                     _ => {}
                 }
             }
             Mode::Insert => self.insert_text(key_event),
-            Mode::Visual => match key_event.code {
-                _ => {
-                    // self.process_motion(key_event.code);
-                }
-            },
+            // Mode::Visual => match key_event.code {
+            //     _ => {
+            //         // self.process_motion(key_event.code);
+            //     }
+            // },
         }
     }
 
@@ -452,86 +476,6 @@ impl App {
         self.cursor_pos.x = safe_idx - self.rope.line_to_char(self.cursor_pos.y);
     }
 
-    fn cursor_first_word(&mut self) {
-        let new_y = self.cursor_pos.y;
-        if new_y < self.rope.len_lines() {
-            let line = self.rope.line(new_y);
-            let leading_whitespace = line
-                .chars()
-                .take_while(|c| c.is_whitespace() && *c != '\n')
-                .count();
-            self.cursor_pos.x = leading_whitespace;
-        }
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn cursor_top(&mut self) {
-        self.cursor_pos.y = 0;
-        self.cursor_pos.x = 0;
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn cursor_bottom(&mut self) {
-        self.cursor_pos.y = self.rope.len_lines().saturating_sub(2);
-        self.cursor_pos.x = 0;
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn cursor_start(&mut self) {
-        self.cursor_pos.x = 0;
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn cursor_end(&mut self) {
-        let y = self.cursor_pos.y;
-        let line = self.rope.line(y);
-        let line_len = line.len_chars();
-
-        if line_len == 0 {
-            self.cursor_pos.x = 0;
-            return;
-        }
-
-        // Check if the last character is a newline
-        let last_char = line.char(line_len.saturating_sub(1));
-        let has_newline = last_char == '\n' || last_char == '\r';
-
-        if has_newline {
-            // Stop at the character BEFORE the newline
-            // If the line is JUST a newline, x becomes 0
-            self.cursor_pos.x = line_len.saturating_sub(2);
-        } else {
-            // No newline (end of file), stop at the very last character
-            self.cursor_pos.x = line_len.saturating_sub(1);
-        }
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn cursor_down(&mut self) {
-        if self.cursor_pos.y == self.rope.len_lines().saturating_sub(2) {
-            return;
-        }
-        self.cursor_pos.y = self.cursor_pos.y + 1;
-        self.cursor_pos.x = self.cursor_pos.preferred_x;
-    }
-
-    fn cursor_up(&mut self) {
-        self.cursor_pos.y = self.cursor_pos.y.saturating_sub(1);
-        self.cursor_pos.x = self.cursor_pos.preferred_x;
-    }
-
-    fn cursor_left(&mut self) {
-        self.cursor_pos.x = self.cursor_pos.x.saturating_sub(1);
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn cursor_right(&mut self) {
-        if let Some(line) = self.rope.get_line(self.cursor_pos.y) {
-            self.cursor_pos.x = (self.cursor_pos.x + 1).min(line.len_chars().saturating_sub(1));
-        }
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
     fn open_line_below(&mut self) {
         let y = self.cursor_pos.y;
         let current_line = self.rope.line(y);
@@ -591,120 +535,6 @@ impl App {
         self.cursor_pos.x = whitespace.chars().count();
 
         self.mode = Mode::Insert;
-    }
-
-    fn move_word_forward(&mut self) {
-        let mut char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-        let total_chars = self.rope.len_chars();
-
-        if char_idx >= total_chars.saturating_sub(1) {
-            return;
-        }
-
-        let mut iter = self.rope.chars_at(char_idx);
-
-        // 1. Skip current "type" of characters (word vs non-word)
-        if let Some(first_char) = iter.next() {
-            char_idx += 1;
-            let starting_is_alnum = first_char.is_alphanumeric() || first_char == '_';
-
-            for c in iter {
-                let current_is_alnum = c.is_alphanumeric() || c == '_';
-                if current_is_alnum != starting_is_alnum || c.is_whitespace() {
-                    break;
-                }
-                char_idx += 1;
-            }
-        }
-
-        // 2. Skip any trailing whitespace to land at the start of the next word
-        let iter = self.rope.chars_at(char_idx);
-        for c in iter {
-            if !c.is_whitespace() {
-                break;
-            }
-            char_idx += 1;
-        }
-
-        self.update_cursor_from_char_idx(char_idx);
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn move_word_backward(&mut self) {
-        let mut char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-        if char_idx == 0 {
-            return;
-        }
-
-        // 1. Skip whitespace to the left
-        while char_idx > 0 {
-            let c = self.rope.char(char_idx - 1);
-            if !c.is_whitespace() {
-                break;
-            }
-            char_idx -= 1;
-        }
-
-        if char_idx == 0 {
-            return;
-        }
-
-        // 2. Determine character type (alphanumeric vs punctuation)
-        let first_char = self.rope.char(char_idx - 1);
-        let target_is_alnum = first_char.is_alphanumeric() || first_char == '_';
-
-        // 3. Move left until the type changes or we hit whitespace
-        while char_idx > 0 {
-            let c = self.rope.char(char_idx - 1);
-            let current_is_alnum = c.is_alphanumeric() || c == '_';
-
-            if c.is_whitespace() || current_is_alnum != target_is_alnum {
-                break;
-            }
-            char_idx -= 1;
-        }
-
-        self.update_cursor_from_char_idx(char_idx);
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn move_word_end(&mut self) {
-        let mut char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-        let total_chars = self.rope.len_chars();
-
-        // 1. Move forward at least one char to start the search
-        if char_idx >= total_chars.saturating_sub(1) {
-            return;
-        }
-        char_idx += 1;
-
-        // 2. Skip whitespace to find the start of the next 'thing'
-        while char_idx < total_chars && self.rope.char(char_idx).is_whitespace() {
-            char_idx += 1;
-        }
-
-        if char_idx >= total_chars {
-            return;
-        }
-
-        // 3. Determine the type of the start character
-        let first_char = self.rope.char(char_idx);
-        let is_alnum = first_char.is_alphanumeric() || first_char == '_';
-
-        // 4. Move forward until the type changes or we hit whitespace
-        // We want to stop AT the last character, so we check (char_idx + 1)
-        while char_idx < total_chars.saturating_sub(1) {
-            let next_c = self.rope.char(char_idx + 1);
-            let next_is_alnum = next_c.is_alphanumeric() || next_c == '_';
-
-            if next_c.is_whitespace() || next_is_alnum != is_alnum {
-                break;
-            }
-            char_idx += 1;
-        }
-
-        self.update_cursor_from_char_idx(char_idx);
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
     }
 
     fn move_upper_word_forward(&mut self) {
@@ -799,7 +629,7 @@ impl App {
         if y >= self.rope.len_lines() - 1 && y > 0 {
             self.cursor_pos.y -= 1;
         }
-        self.cursor_first_word();
+        // self.cursor_first_word();
     }
 }
 
@@ -859,6 +689,21 @@ fn cursor_down_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
         let target_x = cursor_pos.x.min(line_len.saturating_sub(2));
         rope.line_to_char(target_y) + target_x
     }
+}
+
+fn first_word_idx(cursor_pos: &CursorPos, rope: &Rope) -> usize {
+    let y = cursor_pos.y;
+    let line = rope.line(y);
+    let mut first_word_idx = rope.line_to_char(y);
+    for c in line.chars() {
+        if c.is_whitespace() && c != '\n' {
+            first_word_idx += 1;
+            continue;
+        }
+        break;
+    }
+
+    first_word_idx
 }
 
 fn next_word_idx(mut idx: usize, rope: &Rope) -> usize {
