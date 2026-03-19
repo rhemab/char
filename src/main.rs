@@ -7,7 +7,6 @@ use ratatui::{
     layout::{Constraint, Layout},
     prelude::*,
     style::{Color, Style},
-    widgets::{Block, Paragraph},
 };
 
 use ropey::Rope;
@@ -58,9 +57,39 @@ impl Default for Mode {
     }
 }
 
+fn file_position(y: usize, rope: &Rope) -> String {
+    let lines = rope.len_lines().saturating_sub(2);
+
+    if y == 0 {
+        return "Top".to_string();
+    }
+
+    if y == lines {
+        return "Bot".to_string();
+    }
+
+    let file_percent = (y * 100) / lines;
+    format!("{}%", file_percent)
+}
+
+fn format_file_size(bytes: usize) -> String {
+    const KB: usize = 1024;
+    const MB: usize = 1024 * KB;
+    const GB: usize = 1024 * MB;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-        let now = std::time::Instant::now();
         let mut args = env::args();
         args.next();
         if let Some(path) = args.next() {
@@ -70,9 +99,10 @@ impl App {
             self.path = path;
         }
         self.command_bar.push_str(&format!(
-            "File loaded in: {:?} {} lines",
-            now.elapsed(),
-            self.rope.len_lines() - 1
+            "\"{}\" {}L, {}",
+            &self.path,
+            self.rope.len_lines() - 1,
+            format_file_size(self.rope.len_bytes()),
         ));
 
         while !self.exit {
@@ -85,7 +115,7 @@ impl App {
     fn draw(&mut self, frame: &mut Frame) {
         use Constraint::{Length, Min};
         let vertical = Layout::vertical([Min(1), Length(1), Length(1)]);
-        let [main_area, status_bar, command_bar] = vertical.areas(frame.area());
+        let [main_area, status_bar, command_bar_area] = vertical.areas(frame.area());
         let status_style = Style::new().bg(Color::DarkGray);
 
         let height = main_area.height as usize;
@@ -97,7 +127,7 @@ impl App {
         let start_idx = self.top_line;
         let end_idx = (start_idx + height).min(self.rope.len_lines());
 
-        // convert rope lines to ratatui lines
+        // convert rope slice to ratatui line
         let mut lines = Vec::new();
         for i in start_idx..end_idx {
             if let Some(rope_line) = self.rope.get_line(i as usize) {
@@ -105,19 +135,33 @@ impl App {
             }
         }
 
+        // content of status bar
         let text_content = Text::from(lines);
+        let file_path_content = Line::from(self.path.clone()).left_aligned();
+        let cursor_location_content = Line::from(format!(
+            "{},{}    {}",
+            self.cursor_pos.y + 1,
+            self.cursor_pos.x + 1,
+            file_position(self.cursor_pos.y, &self.rope),
+        ))
+        .right_aligned();
+
+        // content of command bar
+        let command_bar_content = Line::from(self.command_bar.clone());
+        let command_buffer_content =
+            Line::from(format!("{}    ", self.parser.cmd_buffer.clone())).right_aligned();
 
         // render main content
         frame.render_widget(text_content, main_area);
+
         // render status bar
-        frame.render_widget(
-            Block::new()
-                .title(format!("{}  {}", self.path.clone(), self.parser.cmd_buffer))
-                .style(status_style),
-            status_bar,
-        );
+        frame.render_widget(file_path_content.style(status_style), status_bar);
+        frame.render_widget(cursor_location_content.style(status_style), status_bar);
+
         // render command bar
-        frame.render_widget(Paragraph::new(self.command_bar.clone()), command_bar);
+        frame.render_widget(command_bar_content, command_bar_area);
+        frame.render_widget(command_buffer_content, command_bar_area);
+
         // render cursor
         frame.set_cursor_position((cursor_x as u16, cursor_y as u16));
     }
@@ -789,8 +833,12 @@ fn cursor_up_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
 }
 
 fn cursor_down_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
-    let target_y = cursor_pos.y + count;
+    // check if cursor is on last line
+    let total_lines = rope.len_lines().saturating_sub(2);
+    let target_y = (cursor_pos.y + count).min(total_lines);
+
     if let Ok(i) = rope.try_line_to_char(target_y) {
+        eprintln!("going to next line");
         // get line length
         let target_line = rope.line(target_y);
         let line_len = target_line.len_chars();
@@ -799,9 +847,9 @@ fn cursor_down_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
         let target_x = cursor_pos.x.min(line_len.saturating_sub(2));
         return i + target_x;
     } else {
+        eprintln!("going to last line");
         // go to last line
-        let total_lines = rope.len_lines();
-        let target_y = total_lines.saturating_sub(1);
+        let target_y = total_lines;
 
         // get line length
         let target_line = rope.line(target_y);
@@ -884,7 +932,7 @@ fn line_start_idx(current_line: usize, rope: &Rope) -> usize {
 }
 
 fn line_end_idx(current_idx: usize, rope: &Rope) -> usize {
-    let mut iter = rope.chars_at(current_idx);
+    let iter = rope.chars_at(current_idx);
     let mut idx = current_idx;
 
     for c in iter {
