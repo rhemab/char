@@ -40,6 +40,7 @@ struct CursorPos {
     x: usize,
     y: usize,
     preferred_x: usize,
+    preferred_y: usize,
 }
 
 #[derive(Debug)]
@@ -116,6 +117,10 @@ impl App {
     fn draw(&mut self, frame: &mut Frame) {
         // update command_bar line based on mode
         match self.mode {
+            Mode::Command => {
+                self.cursor_pos.y = self.main_height + 2;
+                self.cursor_pos.x = self.command_bar.len();
+            }
             Mode::Insert => {
                 self.parser.reset();
                 self.command_bar.clear();
@@ -203,6 +208,11 @@ impl App {
                         // if exiting insert mode, move cursor left 1
                         self.cursor_pos.x = self.cursor_pos.x.saturating_sub(1);
                     }
+                    Mode::Command => {
+                        // if exiting command mode put cursor back
+                        self.cursor_pos.y = self.cursor_pos.preferred_y;
+                        self.cursor_pos.x = self.cursor_pos.preferred_x;
+                    }
                     _ => {}
                 }
                 self.return_to_normal_mode();
@@ -217,10 +227,20 @@ impl App {
                         self.exit();
                     }
                     _ => {
+                        self.cursor_pos.y = self.cursor_pos.preferred_y;
+                        self.cursor_pos.x = self.cursor_pos.preferred_x;
                         self.return_to_normal_mode();
                     }
                 },
                 KeyCode::Char(c) => self.command_bar.push(c),
+                KeyCode::Backspace => {
+                    self.command_bar.pop();
+                    if self.command_bar.is_empty() {
+                        self.cursor_pos.y = self.cursor_pos.preferred_y;
+                        self.cursor_pos.x = self.cursor_pos.preferred_x;
+                        self.return_to_normal_mode();
+                    }
+                }
                 _ => {}
             },
             Mode::Normal => {
@@ -246,6 +266,8 @@ impl App {
                         Some(Motion::EnterCommandMode) => {
                             self.command_bar.clear();
                             self.command_bar.push(':');
+                            self.cursor_pos.preferred_y = self.cursor_pos.y;
+                            self.cursor_pos.preferred_x = self.cursor_pos.x;
                             self.mode = Mode::Command;
                             return;
                         }
@@ -365,6 +387,9 @@ impl App {
                             should_update_preferred_x = true;
                         }
                         Some(Motion::LineEnd) => {
+                            if is_empty_line(char_idx, &self.rope) {
+                                return;
+                            }
                             cursor_target_idx = line_end_idx(char_idx, &self.rope);
                             range = (char_idx, cursor_target_idx + 1);
                             self.cursor_pos.preferred_x = usize::MAX;
@@ -544,8 +569,15 @@ impl App {
     }
 }
 
-// get ranges
+// helpers
+fn is_empty_line(idx: usize, rope: &Rope) -> bool {
+    if rope.char(idx) == '\n' {
+        return true;
+    }
+    false
+}
 
+// get ranges
 fn cursor_left_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
     let idx = rope.line_to_char(cursor_pos.y);
     let target_x = cursor_pos.x.saturating_sub(count);
@@ -825,7 +857,7 @@ fn line_end_idx(current_idx: usize, rope: &Rope) -> usize {
     let len = rope.len_chars();
     let mut idx = current_idx;
     while idx < len {
-        if rope.char(idx) == '\n' {
+        if is_empty_line(idx, rope) {
             break;
         }
         idx += 1;
