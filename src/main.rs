@@ -14,6 +14,7 @@ use ropey::Rope;
 use crate::commands::*;
 
 mod commands;
+mod trie;
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
@@ -21,10 +22,10 @@ fn main() -> color_eyre::Result<()> {
     Ok(())
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct App {
     mode: Mode,
-    parser: commands::Parser,
+    parser: Parser,
     exit: bool,
     cursor_pos: CursorPos,
     top_line: usize,
@@ -113,6 +114,20 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        // update command_bar line based on mode
+        match self.mode {
+            Mode::Insert => {
+                self.parser.cmd_buffer.clear();
+                self.command_bar.clear();
+                self.command_bar.push_str("-- INSERT --");
+            }
+            // Mode::Visual => {
+            //     self.parser.cmd_buffer.clear();
+            //     self.command_bar.clear();
+            //     self.command_bar.push_str("-- VISUAL --");
+            // }
+            _ => {}
+        }
         use Constraint::{Length, Min};
         let vertical = Layout::vertical([Min(1), Length(1), Length(1)]);
         let [main_area, status_bar, command_bar_area] = vertical.areas(frame.area());
@@ -209,43 +224,42 @@ impl App {
                 _ => {}
             },
             Mode::Normal => {
-                match key_event.code {
-                    KeyCode::Char(':') => {
-                        self.command_bar.clear();
-                        self.command_bar.push(':');
-                        self.mode = Mode::Command;
-                        return;
-                    }
-                    _ => {}
-                }
-                if let Some(command) = self.parser.generate_command(key_event.code) {
+                if let Some(command) = self.parser.generate_command(key_event) {
                     self.parser.command = None;
                     self.parser.cmd_buffer.clear();
+
                     eprintln!("Command: {:?}", command);
-                    // get range
+
+                    let mut should_update_preferred_x = false;
                     let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
                     let mut range = (char_idx, char_idx);
-                    let mut cursor_target_idx;
+                    let mut cursor_target_idx = char_idx;
                     let mut count = 1;
                     if let Ok(n) = command.count.parse::<usize>() {
                         count = n;
                     }
 
-                    // check for global cmd
-                    match command.global {
-                        Some(Global::FileStart) => {
-                            range = (0, char_idx);
-                            cursor_target_idx = 0;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
-                        }
-                        _ => {}
-                    }
-
                     // check for motion
                     match command.motion {
-                        Some(Motion::InsertMode) => {
+                        Some(Motion::EnterCommandMode) => {
+                            self.command_bar.clear();
+                            self.command_bar.push(':');
+                            self.mode = Mode::Command;
+                            return;
+                        }
+                        Some(Motion::FileStart) => {
+                            range = (0, char_idx);
+                            cursor_target_idx = 0;
+                            should_update_preferred_x = true;
+                        }
+                        Some(Motion::Insert) => {
                             self.mode = Mode::Insert;
+                            return;
+                        }
+                        Some(Motion::Append) => {
+                            self.cursor_pos.x += 1;
+                            self.mode = Mode::Insert;
+                            return;
                         }
                         Some(Motion::Left) => {
                             range = (
@@ -253,8 +267,7 @@ impl App {
                                 char_idx,
                             );
                             cursor_target_idx = range.0;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            should_update_preferred_x = true;
                         }
                         Some(Motion::Right) => {
                             range = (
@@ -262,14 +275,12 @@ impl App {
                                 cursor_right_idx(&self.cursor_pos, count, &self.rope),
                             );
                             cursor_target_idx = range.1;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            should_update_preferred_x = true;
                         }
                         Some(Motion::Up) => {
                             self.cursor_pos.x = self.cursor_pos.preferred_x;
                             range = (char_idx, cursor_up_idx(&self.cursor_pos, count, &self.rope));
                             cursor_target_idx = range.1;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
                         }
                         Some(Motion::Down) => {
                             self.cursor_pos.x = self.cursor_pos.preferred_x;
@@ -278,23 +289,48 @@ impl App {
                                 cursor_down_idx(&self.cursor_pos, count, &self.rope),
                             );
                             cursor_target_idx = range.1;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
                         }
                         Some(Motion::Word) => {
                             for _ in 0..count {
                                 range = (char_idx, next_word_idx(range.1, &self.rope));
                             }
                             cursor_target_idx = range.1;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            should_update_preferred_x = true;
+                        }
+                        Some(Motion::UpperWord) => {
+                            for _ in 0..count {
+                                range = (char_idx, upper_word_idx(range.1, &self.rope));
+                            }
+                            cursor_target_idx = range.1;
+                            should_update_preferred_x = true;
+                        }
+                        Some(Motion::End) => {
+                            for _ in 0..count {
+                                range = (char_idx, word_end_idx(range.1, &self.rope));
+                            }
+                            cursor_target_idx = range.1;
+                            should_update_preferred_x = true;
+                        }
+                        Some(Motion::UpperEnd) => {
+                            for _ in 0..count {
+                                range = (char_idx, upper_word_end_idx(range.1, &self.rope));
+                            }
+                            cursor_target_idx = range.1;
+                            should_update_preferred_x = true;
                         }
                         Some(Motion::Back) => {
                             for _ in 0..count {
-                                range = (back_word_idx(range.0, &self.rope), char_idx);
+                                range = (prev_word_idx(range.0, &self.rope), char_idx);
                             }
                             cursor_target_idx = range.0;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            should_update_preferred_x = true;
+                        }
+                        Some(Motion::UpperBack) => {
+                            for _ in 0..count {
+                                range = (upper_back_word_idx(range.0, &self.rope), char_idx);
+                            }
+                            cursor_target_idx = range.0;
+                            should_update_preferred_x = true;
                         }
                         Some(Motion::FirstWord) => {
                             eprintln!("cursor_pos: {:?}", self.cursor_pos);
@@ -303,63 +339,52 @@ impl App {
                                 char_idx.min(cursor_target_idx),
                                 char_idx.max(cursor_target_idx),
                             );
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            should_update_preferred_x = true;
                         }
                         Some(Motion::LineStart) => {
                             range = (line_start_idx(self.cursor_pos.y, &self.rope), char_idx);
                             cursor_target_idx = range.0;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            should_update_preferred_x = true;
                         }
                         Some(Motion::LineEnd) => {
                             range = (0, line_end_idx(char_idx, &self.rope));
                             cursor_target_idx = range.1;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
                             self.cursor_pos.preferred_x = usize::MAX;
                         }
                         Some(Motion::FileEnd) => {
                             range = (char_idx, file_end_idx(&self.rope));
                             cursor_target_idx = range.1;
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            should_update_preferred_x = true;
+                        }
+                        Some(Motion::NewLineBelow) => {
+                            let (insert_pos, whitespace) =
+                                new_line_below_idx(&self.cursor_pos, &self.rope);
+                            self.rope.insert(insert_pos, &format!("\n{}", whitespace));
+                            self.cursor_pos.y += 1;
+                            self.cursor_pos.x = whitespace.chars().count();
+                            self.mode = Mode::Insert;
+                            return;
+                        }
+                        Some(Motion::NewLineAbove) => {
+                            let (insert_pos, whitespace) =
+                                new_line_above_idx(&self.cursor_pos, &self.rope);
+                            let insert_str = format!("{}\n", whitespace);
+                            self.rope.insert(insert_pos, &insert_str);
+                            self.cursor_pos.x = whitespace.chars().count();
+                            self.mode = Mode::Insert;
+                            return;
                         }
                         _ => {}
                     }
 
-                    // match action & excecute on range
-                    match command.action {
-                        Some(Action::Delete) => {}
-                        Some(Action::Change) => {}
-                        _ => {
-                            eprintln!("range: {:?}", range);
-                        }
+                    self.update_cursor_from_char_idx(cursor_target_idx);
+                    if should_update_preferred_x {
+                        self.cursor_pos.preferred_x = self.cursor_pos.x;
                     }
-
                     self.scroll();
-                }
-
-                // update command_bar line based on mode
-                match self.mode {
-                    Mode::Insert => {
-                        self.parser.cmd_buffer.clear();
-                        self.command_bar.clear();
-                        self.command_bar.push_str("-- INSERT --");
-                    }
-                    // Mode::Visual => {
-                    //     self.parser.cmd_buffer.clear();
-                    //     self.command_bar.clear();
-                    //     self.command_bar.push_str("-- VISUAL --");
-                    // }
-                    _ => {}
                 }
             }
             Mode::Insert => self.insert_text(key_event),
-            // Mode::Visual => match key_event.code {
-            //     _ => {
-            //         // self.process_motion(key_event.code);
-            //     }
-            // },
         }
     }
 
@@ -370,6 +395,12 @@ impl App {
                 let x = self.cursor_pos.x;
                 self.rope.insert_char(i + x, c);
                 self.cursor_pos.x += 1;
+            }
+            KeyCode::Tab => {
+                let i = self.rope.line_to_char(self.cursor_pos.y);
+                let x = self.cursor_pos.x;
+                self.rope.insert(i + x, "    ");
+                self.cursor_pos.x += 4;
             }
             KeyCode::Backspace => {
                 let x = self.cursor_pos.x;
@@ -475,162 +506,6 @@ impl App {
         self.cursor_pos.y = self.rope.char_to_line(safe_idx);
         self.cursor_pos.x = safe_idx - self.rope.line_to_char(self.cursor_pos.y);
     }
-
-    fn open_line_below(&mut self) {
-        let y = self.cursor_pos.y;
-        let current_line = self.rope.line(y);
-
-        // 1. Get leading whitespace
-        let whitespace: String = current_line
-            .chars()
-            .take_while(|c| c.is_whitespace() && *c != '\n' && *c != '\r')
-            .collect();
-
-        // 2. Find the end of the current line TEXT (before the \n)
-        let line_start_char = self.rope.line_to_char(y);
-        let line_len = current_line.len_chars();
-
-        // We want to skip the \n at the end of the current line if it exists
-        let has_newline = current_line
-            .chars()
-            .last()
-            .map_or(false, |c| c == '\n' || c == '\r');
-        let insert_pos = if has_newline {
-            line_start_char + line_len.saturating_sub(1)
-        } else {
-            line_start_char + line_len
-        };
-
-        // 3. Insert \n and the same whitespace
-        self.rope.insert(insert_pos, &format!("\n{}", whitespace));
-
-        // 4. Update cursor
-        self.cursor_pos.y += 1;
-        self.cursor_pos.x = whitespace.chars().count();
-
-        self.mode = Mode::Insert;
-    }
-
-    fn open_line_above(&mut self) {
-        let y = self.cursor_pos.y;
-
-        // 1. Get leading whitespace from the current line
-        let current_line = self.rope.line(y);
-        let whitespace: String = current_line
-            .chars()
-            .take_while(|c| c.is_whitespace() && *c != '\n' && *c != '\r')
-            .collect();
-
-        // 2. Find the start of the current line
-        let line_start_char = self.rope.line_to_char(y);
-
-        // 3. Insert indentation THEN the newline
-        // This places the new text "above" the current content
-        let insert_str = format!("{}\n", whitespace);
-        self.rope.insert(line_start_char, &insert_str);
-
-        // 4. Update cursor
-        // y stays the same because the "new" line is now at the old y index
-        // x moves to the end of the whitespace
-        self.cursor_pos.x = whitespace.chars().count();
-
-        self.mode = Mode::Insert;
-    }
-
-    fn move_upper_word_forward(&mut self) {
-        let mut char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-        let total_chars = self.rope.len_chars();
-
-        if char_idx >= total_chars.saturating_sub(1) {
-            return;
-        }
-
-        // 1. Skip all non-whitespace characters (the current WORD)
-        while char_idx < total_chars && !self.rope.char(char_idx).is_whitespace() {
-            char_idx += 1;
-        }
-
-        // 2. Skip all whitespace characters to land at the start of the next WORD
-        while char_idx < total_chars && self.rope.char(char_idx).is_whitespace() {
-            char_idx += 1;
-        }
-
-        self.update_cursor_from_char_idx(char_idx);
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn move_upper_word_backward(&mut self) {
-        let mut char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-        if char_idx == 0 {
-            return;
-        }
-
-        // 1. Skip whitespace to the left to find a WORD
-        while char_idx > 0 && self.rope.char(char_idx - 1).is_whitespace() {
-            char_idx -= 1;
-        }
-
-        // 2. Move left until we hit whitespace or start of file
-        while char_idx > 0 && !self.rope.char(char_idx - 1).is_whitespace() {
-            char_idx -= 1;
-        }
-
-        self.update_cursor_from_char_idx(char_idx);
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn move_upper_word_end(&mut self) {
-        let mut char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-        let total_chars = self.rope.len_chars();
-
-        if char_idx >= total_chars.saturating_sub(1) {
-            return;
-        }
-        char_idx += 1;
-
-        // 1. Skip whitespace to find the start of the next WORD
-        while char_idx < total_chars && self.rope.char(char_idx).is_whitespace() {
-            char_idx += 1;
-        }
-
-        // 2. Move forward until the character BEFORE a whitespace
-        while char_idx < total_chars.saturating_sub(1)
-            && !self.rope.char(char_idx + 1).is_whitespace()
-        {
-            char_idx += 1;
-        }
-
-        self.update_cursor_from_char_idx(char_idx);
-        self.cursor_pos.preferred_x = self.cursor_pos.x;
-    }
-
-    fn delete_current_line(&mut self) {
-        let y = self.cursor_pos.y;
-        let total_lines = self.rope.len_lines();
-
-        if total_lines == 0 {
-            return;
-        }
-
-        let start_idx = self.rope.line_to_char(y);
-
-        // The end index is the start of the NEXT line.
-        // If there is no next line, it's the end of the rope.
-        let end_idx = if y + 1 < total_lines {
-            self.rope.line_to_char(y + 1)
-        } else {
-            self.rope.len_chars()
-        };
-
-        self.rope.remove(start_idx..end_idx);
-
-        // If we deleted the last line, move cursor up.
-        // Otherwise, keep y the same (the line below just moved up into this slot).
-        if y >= self.rope.len_lines() - 1 && y > 0 {
-            self.cursor_pos.y -= 1;
-        }
-        // self.cursor_first_word();
-    }
 }
 
 // get ranges
@@ -735,34 +610,170 @@ fn next_word_idx(mut idx: usize, rope: &Rope) -> usize {
     idx
 }
 
-fn back_word_idx(mut idx: usize, rope: &Rope) -> usize {
-    if idx == 0 {
+fn upper_word_idx(mut idx: usize, rope: &Rope) -> usize {
+    let len = rope.len_chars();
+    if idx >= len {
         return idx;
     }
 
-    // 1. Skip whitespace to the left
+    // 1. Move off current position
+    idx += 1;
+
+    // 2. Consume non-whitespace until we hit whitespace
+    while idx < len && !rope.char(idx).is_whitespace() {
+        idx += 1;
+    }
+
+    // 3. Skip whitespace, but stop on empty lines
+    while idx < len && rope.char(idx).is_whitespace() {
+        if rope.char(idx) == '\n' && idx + 1 < len && rope.char(idx + 1) == '\n' {
+            return idx + 1;
+        }
+        idx += 1;
+    }
+
+    idx
+}
+
+fn word_end_idx(mut idx: usize, rope: &Rope) -> usize {
+    let len = rope.len_chars();
+    if idx + 1 >= len {
+        return idx;
+    }
+
+    // 1. Move off current position
+    idx += 1;
+
+    // 2. Skip whitespace
+    while idx < len && rope.char(idx).is_whitespace() {
+        idx += 1;
+    }
+
+    if idx >= len {
+        return idx;
+    }
+
+    // 3. Consume the word — stop when the type changes
+    let starting_is_alnum = {
+        let c = rope.char(idx);
+        c.is_alphanumeric() || c == '_'
+    };
+    while idx + 1 < len {
+        let next = rope.char(idx + 1);
+        let next_is_alnum = next.is_alphanumeric() || next == '_';
+        if next.is_whitespace() || next_is_alnum != starting_is_alnum {
+            break;
+        }
+        idx += 1;
+    }
+
+    idx
+}
+
+fn upper_word_end_idx(mut idx: usize, rope: &Rope) -> usize {
+    let len = rope.len_chars();
+    if idx + 1 >= len {
+        return idx;
+    }
+
+    // 1. Move off current position
+    idx += 1;
+
+    // 2. Skip whitespace
+    while idx < len && rope.char(idx).is_whitespace() {
+        idx += 1;
+    }
+
+    if idx >= len {
+        return idx;
+    }
+
+    // 3. Consume non-whitespace until it changes — stop on last non-whitespace char
+    while idx + 1 < len {
+        let next = rope.char(idx + 1);
+        if next.is_whitespace() {
+            break;
+        }
+        idx += 1;
+    }
+
+    idx
+}
+
+fn prev_word_idx(mut idx: usize, rope: &Rope) -> usize {
+    if idx == 0 {
+        return 0;
+    }
+
+    // 1. Move off current position
+    idx -= 1;
+
+    // 2. Skip spaces/tabs but stop at newlines
+    while idx > 0 && matches!(rope.char(idx), ' ' | '\t') {
+        idx -= 1;
+    }
+
+    if idx == 0 {
+        return 0;
+    }
+
+    // 3. If we're on a newline, check if the previous line is empty (stop) or skip it
+    while idx > 0 && rope.char(idx) == '\n' {
+        let prev = rope.char(idx - 1);
+        if prev == '\n' {
+            return idx;
+        }
+        idx -= 1;
+    }
+
+    // 4. Consume characters of the same type going backwards
+    let starting_is_alnum = {
+        let c = rope.char(idx);
+        c.is_alphanumeric() || c == '_'
+    };
     while idx > 0 {
-        let c = rope.char(idx - 1);
-        if !c.is_whitespace() {
+        let prev = rope.char(idx - 1);
+        if prev.is_whitespace() {
+            break;
+        }
+        let prev_is_alnum = prev.is_alphanumeric() || prev == '_';
+        if prev_is_alnum != starting_is_alnum {
             break;
         }
         idx -= 1;
     }
 
+    idx
+}
+
+fn upper_back_word_idx(mut idx: usize, rope: &Rope) -> usize {
     if idx == 0 {
-        return idx;
+        return 0;
     }
 
-    // 2. Determine character type (alphanumeric vs punctuation)
-    let first_char = rope.char(idx - 1);
-    let target_is_alnum = first_char.is_alphanumeric() || first_char == '_';
+    // 1. Move off current position
+    idx -= 1;
 
-    // 3. Move left until the type changes or we hit whitespace
+    // 2. Skip spaces/tabs but stop at newlines
+    while idx > 0 && matches!(rope.char(idx), ' ' | '\t') {
+        idx -= 1;
+    }
+
+    // 3. If we're on a newline, check if the previous line is empty (stop) or skip it
+    while idx > 0 && rope.char(idx) == '\n' {
+        // peek at the char before this newline
+        let prev = rope.char(idx - 1);
+        if prev == '\n' {
+            // empty line — stop here
+            return idx;
+        }
+        idx -= 1;
+    }
+
+    // 4. Consume non-whitespace going backwards until we hit whitespace
     while idx > 0 {
-        let c = rope.char(idx - 1);
-        let current_is_alnum = c.is_alphanumeric() || c == '_';
-
-        if c.is_whitespace() || current_is_alnum != target_is_alnum {
+        let prev = rope.char(idx - 1);
+        if prev.is_whitespace() {
             break;
         }
         idx -= 1;
@@ -794,4 +805,47 @@ fn line_end_idx(current_idx: usize, rope: &Rope) -> usize {
 fn file_end_idx(rope: &Rope) -> usize {
     rope.line_to_char(rope.len_lines().saturating_sub(2))
 }
-// testing
+
+fn new_line_below_idx(cursor_pos: &CursorPos, rope: &Rope) -> (usize, String) {
+    let y = cursor_pos.y;
+    let current_line = rope.line(y);
+
+    // 1. Get leading whitespace
+    let whitespace: String = current_line
+        .chars()
+        .take_while(|c| c.is_whitespace() && *c != '\n' && *c != '\r')
+        .collect();
+
+    // 2. Find the end of the current line TEXT (before the \n)
+    let line_start_char = rope.line_to_char(y);
+    let line_len = current_line.len_chars();
+
+    // We want to skip the \n at the end of the current line if it exists
+    let has_newline = current_line
+        .chars()
+        .last()
+        .map_or(false, |c| c == '\n' || c == '\r');
+    let insert_pos = if has_newline {
+        line_start_char + line_len.saturating_sub(1)
+    } else {
+        line_start_char + line_len
+    };
+
+    (insert_pos, whitespace)
+}
+
+fn new_line_above_idx(cursor_pos: &CursorPos, rope: &Rope) -> (usize, String) {
+    let y = cursor_pos.y;
+
+    // 1. Get leading whitespace from the current line
+    let current_line = rope.line(y);
+    let whitespace: String = current_line
+        .chars()
+        .take_while(|c| c.is_whitespace() && *c != '\n' && *c != '\r')
+        .collect();
+
+    // 2. Find the start of the current line
+    let line_start_char = rope.line_to_char(y);
+
+    (line_start_char, whitespace)
+}
