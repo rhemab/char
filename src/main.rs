@@ -117,7 +117,7 @@ impl App {
         // update command_bar line based on mode
         match self.mode {
             Mode::Insert => {
-                self.parser.cmd_buffer.clear();
+                self.parser.reset();
                 self.command_bar.clear();
                 self.command_bar.push_str("-- INSERT --");
             }
@@ -164,7 +164,7 @@ impl App {
         // content of command bar
         let command_bar_content = Line::from(self.command_bar.clone());
         let command_buffer_content =
-            Line::from(format!("{}    ", self.parser.cmd_buffer.clone())).right_aligned();
+            Line::from(format!("{}    ", self.parser.input_buffer.clone())).right_aligned();
 
         // render main content
         frame.render_widget(text_content, main_area);
@@ -226,10 +226,12 @@ impl App {
             Mode::Normal => {
                 if let Some(command) = self.parser.generate_command(key_event) {
                     self.parser.command = None;
-                    self.parser.cmd_buffer.clear();
+                    self.parser.input_buffer.clear();
+                    self.parser.motion_buffer.clear();
 
                     eprintln!("Command: {:?}", command);
 
+                    let mut should_update_cursor_pos = true;
                     let mut should_update_preferred_x = false;
                     let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
                     let mut range = (char_idx, char_idx);
@@ -290,6 +292,22 @@ impl App {
                             );
                             cursor_target_idx = range.1;
                         }
+                        Some(Motion::HalfScreenUp) => {
+                            self.cursor_pos.x = self.cursor_pos.preferred_x;
+                            range = (
+                                char_idx,
+                                cursor_up_idx(&self.cursor_pos, self.main_height / 2, &self.rope),
+                            );
+                            cursor_target_idx = range.1;
+                        }
+                        Some(Motion::HalfScreenDown) => {
+                            self.cursor_pos.x = self.cursor_pos.preferred_x;
+                            range = (
+                                char_idx,
+                                cursor_down_idx(&self.cursor_pos, self.main_height / 2, &self.rope),
+                            );
+                            cursor_target_idx = range.1;
+                        }
                         Some(Motion::Word) => {
                             for _ in 0..count {
                                 range = (char_idx, next_word_idx(range.1, &self.rope));
@@ -347,8 +365,8 @@ impl App {
                             should_update_preferred_x = true;
                         }
                         Some(Motion::LineEnd) => {
-                            range = (0, line_end_idx(char_idx, &self.rope));
-                            cursor_target_idx = range.1;
+                            cursor_target_idx = line_end_idx(char_idx, &self.rope);
+                            range = (char_idx, cursor_target_idx + 1);
                             self.cursor_pos.preferred_x = usize::MAX;
                         }
                         Some(Motion::FileEnd) => {
@@ -377,7 +395,23 @@ impl App {
                         _ => {}
                     }
 
-                    self.update_cursor_from_char_idx(cursor_target_idx);
+                    eprintln!("range: {:?}", range);
+                    eprintln!("preferred x: {:?}", self.cursor_pos.preferred_x);
+
+                    // check for action
+                    match command.action {
+                        Some(Action::Delete) => {
+                            // delete range
+                            self.rope.remove(range.0..range.1);
+                            should_update_cursor_pos = false;
+                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                        }
+                        _ => {}
+                    }
+
+                    if should_update_cursor_pos {
+                        self.update_cursor_from_char_idx(cursor_target_idx);
+                    }
                     if should_update_preferred_x {
                         self.cursor_pos.preferred_x = self.cursor_pos.x;
                     }
@@ -467,6 +501,8 @@ impl App {
     fn return_to_normal_mode(&mut self) {
         self.mode = Mode::Normal;
         self.command_bar.clear();
+        self.parser.input_buffer.clear();
+        self.parser.motion_buffer.clear();
         self.ensure_valid_normal_pos();
         self.cursor_pos.preferred_x = self.cursor_pos.x;
     }
@@ -543,7 +579,6 @@ fn cursor_down_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
     let target_y = (cursor_pos.y + count).min(total_lines);
 
     if let Ok(i) = rope.try_line_to_char(target_y) {
-        eprintln!("going to next line");
         // get line length
         let target_line = rope.line(target_y);
         let line_len = target_line.len_chars();
@@ -552,7 +587,6 @@ fn cursor_down_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
         let target_x = cursor_pos.x.min(line_len.saturating_sub(2));
         return i + target_x;
     } else {
-        eprintln!("going to last line");
         // go to last line
         let target_y = total_lines;
 
@@ -788,17 +822,18 @@ fn line_start_idx(current_line: usize, rope: &Rope) -> usize {
 }
 
 fn line_end_idx(current_idx: usize, rope: &Rope) -> usize {
-    let iter = rope.chars_at(current_idx);
+    let len = rope.len_chars();
     let mut idx = current_idx;
-
-    for c in iter {
-        if c == '\n' {
-            idx -= 1;
+    while idx < len {
+        if rope.char(idx) == '\n' {
             break;
         }
         idx += 1;
     }
-
+    // step back one to land on the last character, not the newline
+    if idx > current_idx {
+        idx -= 1;
+    }
     idx
 }
 

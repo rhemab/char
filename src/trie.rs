@@ -45,19 +45,16 @@ impl TrieNode {
     /// search for a key within the current node
     /// if a found, return a reference to that node
     /// if not found, return none
-    pub fn search<'a>(
-        &self,
-        input_event: &KeyEvent,
-        current_node: &'a TrieNode,
-    ) -> Option<&'a TrieNode> {
-        if let Some(i) = current_node
-            .children
-            .iter()
-            .position(|(e, _)| input_event == e)
-        {
-            return Some(&current_node.children[i].1);
+    pub fn search<'a>(&'a self, event_list: &'a [KeyEvent]) -> Option<&'a TrieNode> {
+        let mut current_node = self;
+        for event in event_list {
+            if let Some(i) = current_node.children.iter().position(|(e, _)| event == e) {
+                current_node = &current_node.children[i].1;
+            } else {
+                return None;
+            }
         }
 
-        None
+        return Some(&current_node);
     }
 }
