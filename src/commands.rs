@@ -25,7 +25,9 @@ pub enum Motion {
     NewLineBelow,
     NewLineAbove,
     Insert,
+    UpperInsert,
     Append,
+    UpperAppend,
     // Paste,
     EnterCommandMode,
     // DeleteLine,
@@ -226,8 +228,16 @@ fn generate_trie() -> TrieNode {
         Motion::Insert,
     );
     trie.insert(
+        &[KeyEvent::new(KeyCode::Char('I'), KeyModifiers::empty())],
+        Motion::UpperInsert,
+    );
+    trie.insert(
         &[KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty())],
         Motion::Append,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('A'), KeyModifiers::empty())],
+        Motion::UpperAppend,
     );
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)],

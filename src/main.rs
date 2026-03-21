@@ -251,7 +251,6 @@ impl App {
 
                     eprintln!("Command: {:?}", command);
 
-                    let mut should_update_cursor_pos = true;
                     let mut should_update_preferred_x = false;
                     let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
                     let mut range = (char_idx, char_idx);
@@ -280,20 +279,52 @@ impl App {
                             self.mode = Mode::Insert;
                             return;
                         }
+                        Some(Motion::UpperInsert) => {
+                            cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
+                            self.update_cursor_from_char_idx(cursor_target_idx);
+                            self.mode = Mode::Insert;
+                            return;
+                        }
                         Some(Motion::Append) => {
                             self.cursor_pos.x += 1;
                             self.mode = Mode::Insert;
                             return;
                         }
+                        Some(Motion::UpperAppend) => {
+                            if is_empty_line(char_idx, &self.rope) {
+                                self.mode = Mode::Insert;
+                                return;
+                            }
+                            cursor_target_idx = line_end_idx(char_idx, &self.rope);
+                            self.update_cursor_from_char_idx(cursor_target_idx);
+                            self.cursor_pos.x += 1;
+                            self.mode = Mode::Insert;
+                            return;
+                        }
                         Some(Motion::Left) => {
+                            if is_empty_line(char_idx, &self.rope) {
+                                return;
+                            }
+                            let mut cursor_adjust = 0;
+                            match command.action {
+                                Some(Action::Delete) => {
+                                    cursor_adjust = count;
+                                }
+                                _ => {}
+                            }
                             range = (
                                 cursor_left_idx(&self.cursor_pos, count, &self.rope),
                                 char_idx,
                             );
-                            cursor_target_idx = range.0;
+                            cursor_target_idx = range.0.saturating_sub(cursor_adjust);
+                            eprintln!("cursor_target: {}", cursor_target_idx);
                             should_update_preferred_x = true;
+                            self.cursor_pos.x = self.cursor_pos.x.saturating_sub(count);
                         }
                         Some(Motion::Right) => {
+                            if is_empty_line(char_idx, &self.rope) {
+                                return;
+                            }
                             range = (
                                 char_idx,
                                 cursor_right_idx(&self.cursor_pos, count, &self.rope),
@@ -302,11 +333,13 @@ impl App {
                             should_update_preferred_x = true;
                         }
                         Some(Motion::Up) => {
+                            // dk should delete two whole lines
                             self.cursor_pos.x = self.cursor_pos.preferred_x;
                             range = (char_idx, cursor_up_idx(&self.cursor_pos, count, &self.rope));
                             cursor_target_idx = range.1;
                         }
                         Some(Motion::Down) => {
+                            // dj should delete two whole lines
                             self.cursor_pos.x = self.cursor_pos.preferred_x;
                             range = (
                                 char_idx,
@@ -345,10 +378,12 @@ impl App {
                             should_update_preferred_x = true;
                         }
                         Some(Motion::End) => {
+                            let mut range_end = char_idx;
                             for _ in 0..count {
-                                range = (char_idx, word_end_idx(range.1, &self.rope));
+                                range_end = word_end_idx(range_end, &self.rope);
                             }
-                            cursor_target_idx = range.1;
+                            range = (char_idx, range_end + 1);
+                            cursor_target_idx = range_end;
                             should_update_preferred_x = true;
                         }
                         Some(Motion::UpperEnd) => {
@@ -373,7 +408,6 @@ impl App {
                             should_update_preferred_x = true;
                         }
                         Some(Motion::FirstWord) => {
-                            eprintln!("cursor_pos: {:?}", self.cursor_pos);
                             cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
                             range = (
                                 char_idx.min(cursor_target_idx),
@@ -428,19 +462,19 @@ impl App {
                         Some(Action::Delete) => {
                             // delete range
                             self.rope.remove(range.0..range.1);
-                            should_update_cursor_pos = false;
+                            cursor_target_idx = range.0;
                             self.cursor_pos.preferred_x = self.cursor_pos.x;
                         }
                         _ => {}
                     }
 
-                    if should_update_cursor_pos {
-                        self.update_cursor_from_char_idx(cursor_target_idx);
-                    }
+                    self.update_cursor_from_char_idx(cursor_target_idx);
+                    self.ensure_valid_normal_pos();
+                    self.scroll();
+
                     if should_update_preferred_x {
                         self.cursor_pos.preferred_x = self.cursor_pos.x;
                     }
-                    self.scroll();
                 }
             }
             Mode::Insert => self.insert_text(key_event),
@@ -570,8 +604,24 @@ impl App {
 }
 
 // helpers
+fn char_is_wordy(c: char) -> bool {
+    if c.is_alphanumeric() || c == '_' {
+        return true;
+    }
+    false
+}
+
+fn is_end_of_line(idx: usize, rope: &Rope) -> bool {
+    let len = rope.len_chars();
+    if idx >= len {
+        return true;
+    }
+    rope.char(idx) == '\n' || idx + 1 >= len || rope.char(idx + 1) == '\n'
+}
+
 fn is_empty_line(idx: usize, rope: &Rope) -> bool {
-    if rope.char(idx) == '\n' {
+    let len = rope.len_chars();
+    if rope.char(idx) == '\n' && idx + 1 < len && rope.char(idx + 1) == '\n' {
         return true;
     }
     false
@@ -587,7 +637,7 @@ fn cursor_left_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
 fn cursor_right_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
     let idx = rope.line_to_char(cursor_pos.y);
     let line = rope.line(cursor_pos.y);
-    let target_x = (cursor_pos.x + count).min(line.len_chars().saturating_sub(2));
+    let target_x = (cursor_pos.x + count).min(line.len_chars().saturating_sub(1));
     idx + target_x
 }
 
@@ -648,27 +698,32 @@ fn first_word_idx(cursor_pos: &CursorPos, rope: &Rope) -> usize {
 }
 
 fn next_word_idx(mut idx: usize, rope: &Rope) -> usize {
-    let mut iter = rope.chars_at(idx);
-
-    // 1. Skip current "type" of characters (word vs non-word)
-    if let Some(first_char) = iter.next() {
-        idx += 1;
-        let starting_is_alnum = first_char.is_alphanumeric() || first_char == '_';
-
-        for c in iter {
-            let current_is_alnum = c.is_alphanumeric() || c == '_';
-            if current_is_alnum != starting_is_alnum || c.is_whitespace() {
-                break;
-            }
-            idx += 1;
-        }
+    let len = rope.len_chars();
+    if idx >= len {
+        return idx;
     }
 
-    // 2. Skip any trailing whitespace to land at the start of the next word
-    let iter = rope.chars_at(idx);
-    for c in iter {
-        if !c.is_whitespace() {
+    // 1. Skip current type of characters (word vs non-word)
+    let starting_is_alnum = {
+        let c = rope.char(idx);
+        c.is_alphanumeric() || c == '_'
+    };
+    while idx < len {
+        let c = rope.char(idx);
+        if c.is_whitespace() {
             break;
+        }
+        let current_is_alnum = c.is_alphanumeric() || c == '_';
+        if current_is_alnum != starting_is_alnum {
+            break;
+        }
+        idx += 1;
+    }
+
+    // 2. Skip whitespace but stop on empty lines
+    while idx < len && rope.char(idx).is_whitespace() {
+        if rope.char(idx) == '\n' && idx + 1 < len && rope.char(idx + 1) == '\n' {
+            return idx + 1;
         }
         idx += 1;
     }
@@ -682,15 +737,12 @@ fn upper_word_idx(mut idx: usize, rope: &Rope) -> usize {
         return idx;
     }
 
-    // 1. Move off current position
-    idx += 1;
-
-    // 2. Consume non-whitespace until we hit whitespace
+    // 1. Skip non-whitespace
     while idx < len && !rope.char(idx).is_whitespace() {
         idx += 1;
     }
 
-    // 3. Skip whitespace, but stop on empty lines
+    // 2. Skip whitespace but stop on empty lines
     while idx < len && rope.char(idx).is_whitespace() {
         if rope.char(idx) == '\n' && idx + 1 < len && rope.char(idx + 1) == '\n' {
             return idx + 1;
@@ -857,15 +909,12 @@ fn line_end_idx(current_idx: usize, rope: &Rope) -> usize {
     let len = rope.len_chars();
     let mut idx = current_idx;
     while idx < len {
-        if is_empty_line(idx, rope) {
+        if is_end_of_line(idx, rope) {
             break;
         }
         idx += 1;
     }
-    // step back one to land on the last character, not the newline
-    if idx > current_idx {
-        idx -= 1;
-    }
+
     idx
 }
 
