@@ -7,6 +7,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     prelude::*,
     style::{Color, Style},
+    widgets::Block,
 };
 
 use ropey::Rope;
@@ -33,6 +34,7 @@ pub struct App {
     rope: Rope,
     command_bar: String,
     path: String,
+    visual_selection: (usize, usize),
 }
 
 #[derive(Default, Debug)]
@@ -47,7 +49,7 @@ struct CursorPos {
 enum Mode {
     Normal,
     Insert,
-    // Visual,
+    Visual,
     // VisualLine,
     // VisualBlock,
     Command,
@@ -127,11 +129,11 @@ impl App {
                 self.command_bar.clear();
                 self.command_bar.push_str("-- INSERT --");
             }
-            // Mode::Visual => {
-            //     self.parser.cmd_buffer.clear();
-            //     self.command_bar.clear();
-            //     self.command_bar.push_str("-- VISUAL --");
-            // }
+            Mode::Visual => {
+                self.parser.reset();
+                self.command_bar.clear();
+                self.command_bar.push_str("-- VISUAL --");
+            }
             _ => {}
         }
         use Constraint::{Length, Min};
@@ -142,26 +144,53 @@ impl App {
         let height = main_area.height as usize;
         self.main_height = height;
 
-        let cursor_x = self.cursor_pos.x;
-        let cursor_y = if self.mode != Mode::Command {
-            self.cursor_pos.y.saturating_sub(self.top_line)
-        } else {
-            self.cursor_pos.y
-        };
-
         let start_idx = self.top_line;
         let end_idx = (start_idx + height).min(self.rope.len_lines());
 
+        // get visual selection range
+        // convert that to ropey idx range
+        // push all text before range to ratatui
+        // push visual selection text to ratatui with style
+        // push the rest of the text
+
         // convert rope slice to ratatui line
         let mut lines = Vec::new();
+        let mut line_nums = vec![];
         for i in start_idx..end_idx {
             if let Some(rope_line) = self.rope.get_line(i as usize) {
                 lines.push(Line::from(rope_line.to_string()));
+                let line_number = if i == self.cursor_pos.y || self.mode == Mode::Command {
+                    i + 1 // absolute, 1-indexed
+                } else {
+                    (i as isize - self.cursor_pos.y as isize).unsigned_abs()
+                };
+                line_nums.push(Line::from((line_number).to_string()));
             }
         }
 
+        // length of last line num
+        line_nums.pop();
+        let n = self.rope.len_lines();
+        let digits = if n == 0 { 1 } else { n.ilog10() + 1 };
+        let gap = 1;
+        let horizontal = Layout::horizontal([Length((digits) as u16), Length(gap), Min(1)]);
+        let [num_col, gap_col, text_area] = horizontal.areas(main_area);
+
+        let x_offset = digits + gap as u32;
+        let cursor_x = if self.mode == Mode::Command {
+            self.cursor_pos.x
+        } else {
+            self.cursor_pos.x + x_offset as usize
+        };
+        let cursor_y = if self.mode == Mode::Command {
+            self.cursor_pos.y
+        } else {
+            self.cursor_pos.y.saturating_sub(self.top_line)
+        };
+
         // content of status bar
         let text_content = Text::from(lines);
+        let line_nums = Text::from(line_nums).alignment(Alignment::Right);
         let file_path_content = Line::from(self.path.clone()).left_aligned();
         let cursor_location_content = Line::from(format!(
             "{},{}    {}",
@@ -177,7 +206,9 @@ impl App {
             Line::from(format!("{}    ", self.parser.input_buffer.clone())).right_aligned();
 
         // render main content
-        frame.render_widget(text_content, main_area);
+        frame.render_widget(line_nums.style(Style::new().fg(Color::DarkGray)), num_col);
+        frame.render_widget(Block::new(), gap_col);
+        frame.render_widget(text_content.style(Style::new().fg(Color::Gray)), text_area);
 
         // render status bar
         frame.render_widget(file_path_content.style(status_style), status_bar);
@@ -247,7 +278,8 @@ impl App {
                 }
                 _ => {}
             },
-            Mode::Normal => {
+            Mode::Insert => self.insert_text(key_event),
+            _ => {
                 if let Some(command) = self.parser.generate_command(key_event) {
                     self.parser.command = None;
                     self.parser.input_buffer.clear();
@@ -279,7 +311,11 @@ impl App {
                             cursor_target_idx = 0;
                             should_update_preferred_x = true;
                         }
-                        Some(Motion::Insert) => {
+                        Some(Motion::VisualMode) => {
+                            self.mode = Mode::Visual;
+                            return;
+                        }
+                        Some(Motion::InsertMode) => {
                             self.mode = Mode::Insert;
                             return;
                         }
@@ -472,6 +508,7 @@ impl App {
                         _ => {}
                     }
 
+                    self.visual_selection = range;
                     self.update_cursor_from_char_idx(cursor_target_idx);
                     self.ensure_valid_normal_pos();
                     self.scroll();
@@ -481,7 +518,6 @@ impl App {
                     }
                 }
             }
-            Mode::Insert => self.insert_text(key_event),
         }
     }
 
