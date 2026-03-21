@@ -43,7 +43,7 @@ struct CursorPos {
     preferred_y: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Mode {
     Normal,
     Insert,
@@ -120,6 +120,7 @@ impl App {
             Mode::Command => {
                 self.cursor_pos.y = self.main_height + 2;
                 self.cursor_pos.x = self.command_bar.len();
+                eprintln!("cursor pos: {:?}", self.cursor_pos);
             }
             Mode::Insert => {
                 self.parser.reset();
@@ -142,7 +143,11 @@ impl App {
         self.main_height = height;
 
         let cursor_x = self.cursor_pos.x;
-        let cursor_y = self.cursor_pos.y.saturating_sub(self.top_line);
+        let cursor_y = if self.mode != Mode::Command {
+            self.cursor_pos.y.saturating_sub(self.top_line)
+        } else {
+            self.cursor_pos.y
+        };
 
         let start_idx = self.top_line;
         let end_idx = (start_idx + height).min(self.rope.len_lines());
@@ -186,7 +191,6 @@ impl App {
         frame.set_cursor_position((cursor_x as u16, cursor_y as u16));
     }
 
-    /// updates the application's state based on user input
     fn handle_events(&mut self) -> io::Result<()> {
         match event::read()? {
             // it's important to check that the event is a key press event as
@@ -604,13 +608,6 @@ impl App {
 }
 
 // helpers
-fn char_is_wordy(c: char) -> bool {
-    if c.is_alphanumeric() || c == '_' {
-        return true;
-    }
-    false
-}
-
 fn is_end_of_line(idx: usize, rope: &Rope) -> bool {
     let len = rope.len_chars();
     if idx >= len {
