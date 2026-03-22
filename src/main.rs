@@ -34,7 +34,13 @@ pub struct App {
     rope: Rope,
     command_bar: String,
     path: String,
-    visual_selection: (usize, usize),
+    visual_selection: VisualSelection,
+}
+
+#[derive(Default, Debug)]
+struct VisualSelection {
+    ancor: usize,
+    cursor: usize,
 }
 
 #[derive(Default, Debug)]
@@ -122,17 +128,6 @@ impl App {
             Mode::Command => {
                 self.cursor_pos.y = self.main_height + 2;
                 self.cursor_pos.x = self.command_bar.len();
-                eprintln!("cursor pos: {:?}", self.cursor_pos);
-            }
-            Mode::Insert => {
-                self.parser.reset();
-                self.command_bar.clear();
-                self.command_bar.push_str("-- INSERT --");
-            }
-            Mode::Visual => {
-                self.parser.reset();
-                self.command_bar.clear();
-                self.command_bar.push_str("-- VISUAL --");
             }
             _ => {}
         }
@@ -144,8 +139,8 @@ impl App {
         let height = main_area.height as usize;
         self.main_height = height;
 
-        let start_idx = self.top_line;
-        let end_idx = (start_idx + height).min(self.rope.len_lines());
+        let start_line_idx = self.top_line;
+        let end_line_idx = (start_line_idx + height).min(self.rope.len_lines());
 
         // get visual selection range
         // convert that to ropey idx range
@@ -153,12 +148,52 @@ impl App {
         // push visual selection text to ratatui with style
         // push the rest of the text
 
+        let start_select_rng = self
+            .visual_selection
+            .ancor
+            .min(self.visual_selection.cursor);
+        let end_select_rng = self
+            .visual_selection
+            .ancor
+            .max(self.visual_selection.cursor);
+
+        // get each line
+        // check the idx at the end of the line
+        // if found start select rng, create spans with styles
+        // continue until found end select rng
+        // push the rest of the lines
+
         // convert rope slice to ratatui line
         let mut lines = Vec::new();
         let mut line_nums = vec![];
-        for i in start_idx..end_idx {
+        for i in start_line_idx..end_line_idx {
             if let Some(rope_line) = self.rope.get_line(i as usize) {
-                lines.push(Line::from(rope_line.to_string()));
+                let line_start_char = self.rope.line_to_char(i);
+                let line_end_char = line_start_char + rope_line.len_chars();
+
+                // does this line overlap with the selection at all?
+                let line_in_selection = self.mode == Mode::Visual
+                    && line_end_char > start_select_rng
+                    && line_start_char <= end_select_rng;
+
+                if line_in_selection {
+                    let mut line = vec![];
+                    for (j, c) in rope_line.chars().enumerate() {
+                        let abs_idx = line_start_char + j;
+                        if abs_idx >= start_select_rng && abs_idx <= end_select_rng {
+                            line.push(
+                                Span::raw(c.to_string())
+                                    .fg(Color::White)
+                                    .bg(Color::DarkGray),
+                            );
+                        } else {
+                            line.push(Span::raw(c.to_string()));
+                        }
+                    }
+                    lines.push(Line::from(line));
+                } else {
+                    lines.push(Line::from(rope_line.to_string()));
+                }
                 let line_number = if i == self.cursor_pos.y || self.mode == Mode::Command {
                     i + 1 // absolute, 1-indexed
                 } else {
@@ -281,9 +316,7 @@ impl App {
             Mode::Insert => self.insert_text(key_event),
             _ => {
                 if let Some(command) = self.parser.generate_command(key_event) {
-                    self.parser.command = None;
-                    self.parser.input_buffer.clear();
-                    self.parser.motion_buffer.clear();
+                    self.parser.reset();
 
                     eprintln!("Command: {:?}", command);
 
@@ -312,10 +345,16 @@ impl App {
                             should_update_preferred_x = true;
                         }
                         Some(Motion::VisualMode) => {
+                            self.visual_selection.ancor = char_idx;
+                            self.visual_selection.cursor = char_idx;
+                            self.command_bar.clear();
+                            self.command_bar.push_str("-- VISUAL --");
                             self.mode = Mode::Visual;
                             return;
                         }
                         Some(Motion::InsertMode) => {
+                            self.command_bar.clear();
+                            self.command_bar.push_str("-- INSERT --");
                             self.mode = Mode::Insert;
                             return;
                         }
@@ -357,7 +396,6 @@ impl App {
                                 char_idx,
                             );
                             cursor_target_idx = range.0.saturating_sub(cursor_adjust);
-                            eprintln!("cursor_target: {}", cursor_target_idx);
                             should_update_preferred_x = true;
                             self.cursor_pos.x = self.cursor_pos.x.saturating_sub(count);
                         }
@@ -494,9 +532,6 @@ impl App {
                         _ => {}
                     }
 
-                    eprintln!("range: {:?}", range);
-                    eprintln!("preferred x: {:?}", self.cursor_pos.preferred_x);
-
                     // check for action
                     match command.action {
                         Some(Action::Delete) => {
@@ -508,9 +543,10 @@ impl App {
                         _ => {}
                     }
 
-                    self.visual_selection = range;
                     self.update_cursor_from_char_idx(cursor_target_idx);
                     self.ensure_valid_normal_pos();
+                    self.visual_selection.cursor =
+                        self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
                     self.scroll();
 
                     if should_update_preferred_x {

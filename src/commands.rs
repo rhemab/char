@@ -129,11 +129,10 @@ impl Parser {
                         });
                     }
                 }
-            } else {
-                // return none here so that the buffer doesn't reset
-                // because we found a node but not yet a command
-                return None;
             }
+            // return none here so that the buffer doesn't reset
+            // because we found a node but not yet a command
+            return None;
         }
 
         // reset here because we didn't find a node
