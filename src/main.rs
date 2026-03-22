@@ -27,7 +27,6 @@ fn main() -> color_eyre::Result<()> {
 pub struct App {
     mode: Mode,
     parser: Parser,
-    exit: bool,
     cursor_pos: CursorPos,
     top_line: usize,
     main_height: usize,
@@ -59,6 +58,7 @@ enum Mode {
     // VisualLine,
     // VisualBlock,
     Command,
+    Exit,
 }
 
 impl Default for Mode {
@@ -115,7 +115,7 @@ impl App {
             format_file_size(self.rope.len_bytes()),
         ));
 
-        while !self.exit {
+        while self.mode != Mode::Exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
         }
@@ -643,7 +643,7 @@ impl App {
     }
 
     fn exit(&mut self) {
-        self.exit = true;
+        self.mode = Mode::Exit;
     }
 
     fn ensure_valid_normal_pos(&mut self) {
