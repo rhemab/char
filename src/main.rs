@@ -166,10 +166,11 @@ impl App {
         // convert rope slice to ratatui line
         let mut lines = Vec::new();
         let mut line_nums = vec![];
-        for i in start_line_idx..end_line_idx {
-            if let Some(rope_line) = self.rope.get_line(i as usize) {
-                let line_start_char = self.rope.line_to_char(i);
-                let line_end_char = line_start_char + rope_line.len_chars();
+        for line_num in start_line_idx..end_line_idx {
+            if let Some(rope_line) = self.rope.get_line(line_num as usize) {
+                let line_length = rope_line.len_chars();
+                let line_start_char = self.rope.line_to_char(line_num);
+                let line_end_char = line_start_char + line_length;
 
                 // does this line overlap with the selection at all?
                 let line_in_selection = self.mode == Mode::Visual
@@ -177,27 +178,59 @@ impl App {
                     && line_start_char <= end_select_rng;
 
                 if line_in_selection {
-                    let mut line = vec![];
-                    for (j, c) in rope_line.chars().enumerate() {
-                        let abs_idx = line_start_char + j;
-                        if abs_idx >= start_select_rng && abs_idx <= end_select_rng {
-                            line.push(
-                                Span::raw(c.to_string())
+                    let mut line_of_spans = vec![];
+                    let mut char_buffer = String::new();
+                    let mut highlighting = false;
+                    for (char_idx, c) in rope_line.chars().enumerate() {
+                        if line_length == 1 && c == '\n' {
+                            line_of_spans.push(Span::raw(" ").fg(Color::White).bg(Color::DarkGray));
+                            continue;
+                        }
+                        let abs_idx = line_start_char + char_idx;
+                        let in_select_rng =
+                            abs_idx >= start_select_rng && abs_idx <= end_select_rng;
+                        if in_select_rng {
+                            if !highlighting && !char_buffer.is_empty() {
+                                line_of_spans.push(Span::raw(char_buffer.clone()));
+                                char_buffer.clear();
+                            }
+                            highlighting = true;
+                            char_buffer.push(c);
+                        } else {
+                            if highlighting && !char_buffer.is_empty() {
+                                line_of_spans.push(
+                                    Span::raw(char_buffer.clone())
+                                        .fg(Color::White)
+                                        .bg(Color::DarkGray),
+                                );
+                                char_buffer.clear();
+                            }
+                            highlighting = false;
+                            char_buffer.push(c);
+                        }
+                    }
+                    if !char_buffer.is_empty() {
+                        if highlighting {
+                            line_of_spans.push(
+                                Span::raw(char_buffer.clone())
                                     .fg(Color::White)
                                     .bg(Color::DarkGray),
                             );
                         } else {
-                            line.push(Span::raw(c.to_string()));
+                            line_of_spans.push(Span::raw(char_buffer.clone()));
                         }
                     }
-                    lines.push(Line::from(line));
+
+                    lines.push(Line::from(line_of_spans));
                 } else {
                     lines.push(Line::from(rope_line.to_string()));
                 }
-                let line_number = if i == self.cursor_pos.y || self.mode == Mode::Command {
-                    i + 1 // absolute, 1-indexed
+
+                // generate line numbers
+                let line_number = if line_num == self.cursor_pos.y || self.mode == Mode::Command {
+                    line_num + 1 // absolute, 1-indexed
                 } else {
-                    (i as isize - self.cursor_pos.y as isize).unsigned_abs()
+                    (line_num as isize - self.cursor_pos.y as isize).unsigned_abs()
                 };
                 line_nums.push(Line::from((line_number).to_string()));
             }
