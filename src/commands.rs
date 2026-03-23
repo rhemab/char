@@ -32,13 +32,15 @@ pub enum Motion {
     EnterCommandMode,
     DeleteLine,
     ChangeLine,
-    // Paste,
+    YankLine,
+    Paste,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Action {
     Delete,
     Change,
+    Yank,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -143,6 +145,32 @@ impl Parser {
                 } else {
                     self.command = Some(Command {
                         action: Some(Action::Change),
+                        ..Default::default()
+                    })
+                }
+                return None;
+            }
+            (KeyCode::Char('y'), KeyModifiers::NONE) => {
+                // if in visual mode, send action
+                if visual_mode {
+                    return Some(Command {
+                        action: Some(Action::Yank),
+                        ..Default::default()
+                    });
+                }
+                if let Some(cmd) = &mut self.command {
+                    // if 'yy' change line
+                    match cmd.action {
+                        Some(Action::Yank) => {
+                            cmd.motion = Some(Motion::YankLine);
+                            return Some(cmd.clone());
+                        }
+                        _ => {}
+                    }
+                    cmd.action = Some(Action::Yank);
+                } else {
+                    self.command = Some(Command {
+                        action: Some(Action::Yank),
                         ..Default::default()
                     })
                 }
@@ -300,6 +328,10 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)],
         Motion::HalfScreenUp,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty())],
+        Motion::Paste,
     );
 
     trie

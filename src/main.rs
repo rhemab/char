@@ -35,6 +35,7 @@ pub struct App {
     command_bar: String,
     path: String,
     visual_selection: VisualSelection,
+    yank_buffer: String,
 }
 
 #[derive(Default, Debug)]
@@ -581,7 +582,7 @@ impl App {
                             self.change_mode(Mode::Insert);
                             return;
                         }
-                        Some(Motion::DeleteLine) => {
+                        Some(Motion::DeleteLine) | Some(Motion::YankLine) => {
                             range = (
                                 self.rope.line_to_char(self.cursor_pos.y),
                                 self.rope.line_to_char(self.cursor_pos.y + 1),
@@ -593,11 +594,18 @@ impl App {
                                 self.rope.line_to_char(self.cursor_pos.y + 1) - 1,
                             )
                         }
+                        Some(Motion::Paste) => {
+                            self.rope.insert(char_idx, &self.yank_buffer);
+                            return;
+                        }
                         _ => {}
                     }
 
                     // check for action
                     match command.action {
+                        Some(Action::Yank) => {
+                            self.yank_buffer = self.rope.slice(range.0..range.1).to_string();
+                        }
                         Some(Action::Delete) | Some(Action::Change) => {
                             if visual_mode {
                                 let start_select_rng = self
