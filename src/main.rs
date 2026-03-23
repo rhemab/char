@@ -25,6 +25,7 @@ fn main() -> color_eyre::Result<()> {
 
 #[derive(Default)]
 pub struct App {
+    dirty: bool,
     mode: Mode,
     parser: Parser,
     cursor_pos: CursorPos,
@@ -67,25 +68,6 @@ impl Default for Mode {
     }
 }
 
-fn file_position(y: usize, rope: &Rope) -> String {
-    let lines = rope.len_lines().saturating_sub(2);
-
-    if lines == 0 {
-        return "Top".to_string();
-    }
-
-    if y == 0 {
-        return "Top".to_string();
-    }
-
-    if y == lines {
-        return "Bot".to_string();
-    }
-
-    let file_percent = (y * 100) / lines;
-    format!("{}%", file_percent)
-}
-
 fn format_file_size(bytes: usize) -> String {
     const KB: usize = 1024;
     const MB: usize = 1024 * KB;
@@ -103,6 +85,30 @@ fn format_file_size(bytes: usize) -> String {
 }
 
 impl App {
+    fn file_position(&self) -> String {
+        let y = if self.mode == Mode::Command {
+            self.cursor_pos.preferred_y
+        } else {
+            self.cursor_pos.y
+        };
+        let lines = self.rope.len_lines().saturating_sub(2);
+
+        if lines <= self.main_height {
+            return "Top".to_string();
+        }
+
+        if y == 0 {
+            return "Top".to_string();
+        }
+
+        if y == lines {
+            return "Bot".to_string();
+        }
+
+        let file_percent = (y * 100) / lines;
+        format!("{}%", file_percent)
+    }
+
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         let mut args = env::args();
         args.next();
@@ -127,7 +133,6 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        // update command_bar line based on mode
         match self.mode {
             Mode::Command => {
                 self.cursor_pos.y = self.main_height + 2;
@@ -228,7 +233,6 @@ impl App {
             }
         }
 
-        // length of last line num
         line_nums.pop();
         let n = self.rope.len_lines();
         let digits = if n == 0 { 1 } else { n.ilog10() + 1 };
@@ -251,14 +255,28 @@ impl App {
         // content of status bar
         let text_content = Text::from(lines);
         let line_nums = Text::from(line_nums).alignment(Alignment::Right);
-        let file_path_content = Line::from(self.path.clone()).left_aligned();
-        let cursor_location_content = Line::from(format!(
-            "{},{}    {}",
-            self.cursor_pos.y + 1,
-            self.cursor_pos.x + 1,
-            file_position(self.cursor_pos.y, &self.rope),
-        ))
-        .right_aligned();
+        let file_path_content = if self.dirty {
+            Line::from(format!("{} [+]", self.path.clone())).left_aligned()
+        } else {
+            Line::from(self.path.clone()).left_aligned()
+        };
+        let cursor_location_content = if self.mode != Mode::Command {
+            Line::from(format!(
+                "{},{}    {}",
+                self.cursor_pos.y + 1,
+                self.cursor_pos.x + 1,
+                self.file_position(),
+            ))
+            .right_aligned()
+        } else {
+            Line::from(format!(
+                "{},{}    {}",
+                self.cursor_pos.preferred_y + 1,
+                self.cursor_pos.preferred_x + 1,
+                self.file_position(),
+            ))
+            .right_aligned()
+        };
 
         // content of command bar
         let command_bar_content = Line::from(self.command_bar.clone());
@@ -655,6 +673,7 @@ impl App {
             }
             _ => {}
         }
+        self.scroll();
     }
 
     fn scroll(&mut self) {
