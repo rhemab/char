@@ -34,8 +34,9 @@ pub struct App {
     rope: Rope,
     command_bar: String,
     path: String,
-    visual_selection: VisualSelection,
+    selection: VisualSelection,
     yank_buffer: String,
+    highlight_yank: bool,
 }
 
 #[derive(Default, Debug)]
@@ -160,14 +161,8 @@ impl App {
         let start_line_idx = self.top_line;
         let end_line_idx = (start_line_idx + height).min(self.rope.len_lines());
 
-        let start_select_rng = self
-            .visual_selection
-            .ancor
-            .min(self.visual_selection.cursor);
-        let end_select_rng = self
-            .visual_selection
-            .ancor
-            .max(self.visual_selection.cursor);
+        let start_select_rng = self.selection.ancor.min(self.selection.cursor);
+        let end_select_rng = self.selection.ancor.max(self.selection.cursor);
 
         // convert rope slice to ratatui line
         let mut lines = Vec::new();
@@ -178,8 +173,7 @@ impl App {
                 let line_start_char = self.rope.line_to_char(line_num);
                 let line_end_char = line_start_char + line_length;
 
-                // does this line overlap with the selection at all?
-                let line_in_selection = self.mode == Mode::Visual
+                let line_in_selection = (self.mode == Mode::Visual || self.highlight_yank)
                     && line_end_char > start_select_rng
                     && line_start_char <= end_select_rng;
 
@@ -245,7 +239,8 @@ impl App {
             }
         }
 
-        line_nums.pop();
+        self.highlight_yank = false;
+
         let n = self.rope.len_lines();
         let digits = if n == 0 { 1 } else { n.ilog10() + 2 };
         let gap = 1;
@@ -399,8 +394,8 @@ impl App {
                             should_update_preferred_x = true;
                         }
                         Some(Motion::VisualMode) => {
-                            self.visual_selection.ancor = char_idx;
-                            self.visual_selection.cursor = char_idx;
+                            self.selection.ancor = char_idx;
+                            self.selection.cursor = char_idx;
                             self.change_mode(Mode::Visual);
                             return;
                         }
@@ -596,7 +591,7 @@ impl App {
                         }
                         Some(Motion::Paste) => {
                             self.rope.insert(char_idx, &self.yank_buffer);
-                            return;
+                            cursor_target_idx = char_idx + self.yank_buffer.len();
                         }
                         _ => {}
                     }
@@ -605,17 +600,17 @@ impl App {
                     match command.action {
                         Some(Action::Yank) => {
                             self.yank_buffer = self.rope.slice(range.0..range.1).to_string();
+                            self.selection.cursor = range.0;
+                            self.selection.ancor = range.1.saturating_sub(1);
+                            self.highlight_yank = true;
+                            return;
                         }
                         Some(Action::Delete) | Some(Action::Change) => {
                             if visual_mode {
-                                let start_select_rng = self
-                                    .visual_selection
-                                    .ancor
-                                    .min(self.visual_selection.cursor);
-                                let end_select_rng = self
-                                    .visual_selection
-                                    .ancor
-                                    .max(self.visual_selection.cursor);
+                                let start_select_rng =
+                                    self.selection.ancor.min(self.selection.cursor);
+                                let end_select_rng =
+                                    self.selection.ancor.max(self.selection.cursor);
                                 range = (start_select_rng, end_select_rng + 1);
                             }
                             // delete range
@@ -637,7 +632,7 @@ impl App {
 
                     self.update_cursor_from_char_idx(cursor_target_idx);
                     self.ensure_valid_normal_pos();
-                    self.visual_selection.cursor =
+                    self.selection.cursor =
                         self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
                     self.scroll();
 
