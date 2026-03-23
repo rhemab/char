@@ -233,17 +233,20 @@ impl App {
 
                 // generate line numbers
                 let line_number = if line_num == self.cursor_pos.y || self.mode == Mode::Command {
-                    line_num + 1 // absolute, 1-indexed
+                    format!("{} ", line_num + 1) // absolute, 1-indexed
                 } else {
-                    (line_num as isize - self.cursor_pos.y as isize).unsigned_abs()
+                    format!(
+                        "{}",
+                        (line_num as isize - self.cursor_pos.y as isize).unsigned_abs()
+                    )
                 };
-                line_nums.push(Line::from((line_number).to_string()));
+                line_nums.push(Line::from(line_number));
             }
         }
 
         line_nums.pop();
         let n = self.rope.len_lines();
-        let digits = if n == 0 { 1 } else { n.ilog10() + 1 };
+        let digits = if n == 0 { 1 } else { n.ilog10() + 2 };
         let gap = 1;
         let horizontal = Layout::horizontal([Length((digits) as u16), Length(gap), Min(1)]);
         let [num_col, gap_col, text_area] = horizontal.areas(main_area);
@@ -577,6 +580,18 @@ impl App {
                             self.cursor_pos.x = whitespace.chars().count();
                             self.change_mode(Mode::Insert);
                             return;
+                        }
+                        Some(Motion::DeleteLine) => {
+                            range = (
+                                self.rope.line_to_char(self.cursor_pos.y),
+                                self.rope.line_to_char(self.cursor_pos.y + 1),
+                            )
+                        }
+                        Some(Motion::ChangeLine) => {
+                            range = (
+                                self.rope.line_to_char(self.cursor_pos.y),
+                                self.rope.line_to_char(self.cursor_pos.y + 1) - 1,
+                            )
                         }
                         _ => {}
                     }

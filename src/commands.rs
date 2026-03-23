@@ -29,10 +29,10 @@ pub enum Motion {
     UpperInsert,
     Append,
     UpperAppend,
-    // Paste,
     EnterCommandMode,
-    // DeleteLine,
-    // ChangeLine,
+    DeleteLine,
+    ChangeLine,
+    // Paste,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -105,6 +105,14 @@ impl Parser {
                     });
                 }
                 if let Some(cmd) = &mut self.command {
+                    // if 'dd' delete line
+                    match cmd.action {
+                        Some(Action::Delete) => {
+                            cmd.motion = Some(Motion::DeleteLine);
+                            return Some(cmd.clone());
+                        }
+                        _ => {}
+                    }
                     cmd.action = Some(Action::Delete);
                 } else {
                     self.command = Some(Command {
@@ -123,6 +131,14 @@ impl Parser {
                     });
                 }
                 if let Some(cmd) = &mut self.command {
+                    // if 'cc' change line
+                    match cmd.action {
+                        Some(Action::Change) => {
+                            cmd.motion = Some(Motion::ChangeLine);
+                            return Some(cmd.clone());
+                        }
+                        _ => {}
+                    }
                     cmd.action = Some(Action::Change);
                 } else {
                     self.command = Some(Command {
