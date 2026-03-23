@@ -138,6 +138,14 @@ impl App {
                 self.cursor_pos.y = self.main_height + 2;
                 self.cursor_pos.x = self.command_bar.len();
             }
+            Mode::Insert => {
+                self.command_bar.clear();
+                self.command_bar.push_str("-- INSERT --");
+            }
+            Mode::Visual => {
+                self.command_bar.clear();
+                self.command_bar.push_str("-- VISUAL --");
+            }
             _ => {}
         }
         use Constraint::{Length, Min};
@@ -376,11 +384,9 @@ impl App {
                     // check for motion
                     match command.motion {
                         Some(Motion::EnterCommandMode) => {
-                            self.command_bar.clear();
-                            self.command_bar.push(':');
                             self.cursor_pos.preferred_y = self.cursor_pos.y;
                             self.cursor_pos.preferred_x = self.cursor_pos.x;
-                            self.mode = Mode::Command;
+                            self.change_mode(Mode::Command);
                             return;
                         }
                         Some(Motion::FileStart) => {
@@ -391,42 +397,34 @@ impl App {
                         Some(Motion::VisualMode) => {
                             self.visual_selection.ancor = char_idx;
                             self.visual_selection.cursor = char_idx;
-                            self.command_bar.clear();
-                            self.command_bar.push_str("-- VISUAL --");
-                            self.mode = Mode::Visual;
+                            self.change_mode(Mode::Visual);
                             return;
                         }
                         Some(Motion::InsertMode) => {
-                            self.command_bar.clear();
-                            self.command_bar.push_str("-- INSERT --");
-                            self.mode = Mode::Insert;
+                            self.change_mode(Mode::Insert);
                             return;
                         }
                         Some(Motion::UpperInsert) => {
                             cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
                             self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.mode = Mode::Insert;
+                            self.change_mode(Mode::Insert);
                             return;
                         }
                         Some(Motion::Append) => {
                             self.cursor_pos.x += 1;
-                            self.command_bar.clear();
-                            self.command_bar.push_str("-- INSERT --");
-                            self.mode = Mode::Insert;
+                            self.change_mode(Mode::Insert);
                             return;
                         }
                         Some(Motion::UpperAppend) => {
                             let rope_line = self.rope.line(self.cursor_pos.y);
-                            self.command_bar.clear();
-                            self.command_bar.push_str("-- INSERT --");
                             if is_empty_line(&rope_line) {
-                                self.mode = Mode::Insert;
+                                self.change_mode(Mode::Insert);
                                 return;
                             }
                             cursor_target_idx = line_end_idx(char_idx, &self.rope);
                             self.update_cursor_from_char_idx(cursor_target_idx);
                             self.cursor_pos.x += 1;
-                            self.mode = Mode::Insert;
+                            self.change_mode(Mode::Insert);
                             return;
                         }
                         Some(Motion::Left) => {
@@ -554,7 +552,7 @@ impl App {
                                 return;
                             }
                             cursor_target_idx = line_end_idx(char_idx, &self.rope);
-                            range = (char_idx, cursor_target_idx + 1);
+                            range = (char_idx, cursor_target_idx);
                             self.cursor_pos.preferred_x = usize::MAX;
                         }
                         Some(Motion::FileEnd) => {
@@ -568,7 +566,7 @@ impl App {
                             self.rope.insert(insert_pos, &format!("\n{}", whitespace));
                             self.cursor_pos.y += 1;
                             self.cursor_pos.x = whitespace.chars().count();
-                            self.mode = Mode::Insert;
+                            self.change_mode(Mode::Insert);
                             return;
                         }
                         Some(Motion::NewLineAbove) => {
@@ -577,7 +575,7 @@ impl App {
                             let insert_str = format!("{}\n", whitespace);
                             self.rope.insert(insert_pos, &insert_str);
                             self.cursor_pos.x = whitespace.chars().count();
-                            self.mode = Mode::Insert;
+                            self.change_mode(Mode::Insert);
                             return;
                         }
                         _ => {}
@@ -585,7 +583,7 @@ impl App {
 
                     // check for action
                     match command.action {
-                        Some(Action::Delete) => {
+                        Some(Action::Delete) | Some(Action::Change) => {
                             if visual_mode {
                                 let start_select_rng = self
                                     .visual_selection
@@ -599,8 +597,17 @@ impl App {
                             }
                             // delete range
                             self.rope.remove(range.0..range.1);
-                            cursor_target_idx = range.0;
                             self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            cursor_target_idx = range.0;
+
+                            match command.action {
+                                Some(Action::Change) => {
+                                    self.change_mode(Mode::Insert);
+                                }
+                                _ => {
+                                    self.change_mode(Mode::Normal);
+                                }
+                            }
                         }
                         _ => {}
                     }
@@ -697,8 +704,7 @@ impl App {
     }
 
     fn return_to_normal_mode(&mut self) {
-        self.mode = Mode::Normal;
-        self.command_bar.clear();
+        self.change_mode(Mode::Normal);
         self.parser.input_buffer.clear();
         self.parser.motion_buffer.clear();
         self.ensure_valid_normal_pos();
@@ -707,6 +713,29 @@ impl App {
 
     fn exit(&mut self) {
         self.mode = Mode::Exit;
+    }
+
+    fn change_mode(&mut self, target_mode: Mode) {
+        match target_mode {
+            Mode::Normal => {
+                self.command_bar.clear();
+            }
+            Mode::Command => {
+                self.command_bar.clear();
+                self.command_bar.push_str(":");
+            }
+            Mode::Insert => {
+                self.command_bar.clear();
+                self.command_bar.push_str("-- INSERT --");
+            }
+            Mode::Visual => {
+                self.command_bar.clear();
+                self.command_bar.push_str("-- VISUAL --");
+            }
+            _ => {}
+        }
+
+        self.mode = target_mode;
     }
 
     fn ensure_valid_normal_pos(&mut self) {

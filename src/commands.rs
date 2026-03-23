@@ -38,6 +38,7 @@ pub enum Motion {
 #[derive(Debug, Clone, Copy)]
 pub enum Action {
     Delete,
+    Change,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -96,7 +97,7 @@ impl Parser {
         // check for action
         match (key_event.code, key_event.modifiers) {
             (KeyCode::Char('d'), KeyModifiers::NONE) => {
-                // if in visual mode, send delete action
+                // if in visual mode, send action
                 if visual_mode {
                     return Some(Command {
                         action: Some(Action::Delete),
@@ -113,6 +114,24 @@ impl Parser {
                 }
                 return None;
             }
+            (KeyCode::Char('c'), KeyModifiers::NONE) => {
+                // if in visual mode, send action
+                if visual_mode {
+                    return Some(Command {
+                        action: Some(Action::Change),
+                        ..Default::default()
+                    });
+                }
+                if let Some(cmd) = &mut self.command {
+                    cmd.action = Some(Action::Change);
+                } else {
+                    self.command = Some(Command {
+                        action: Some(Action::Change),
+                        ..Default::default()
+                    })
+                }
+                return None;
+            }
             _ => {}
         }
 
@@ -122,8 +141,18 @@ impl Parser {
             if let Some(motion) = node.command {
                 match &mut self.command {
                     Some(cmd) => {
-                        // add motion to existing command
-                        cmd.motion = Some(motion);
+                        // reroute cw to ce
+                        match (cmd.action, motion) {
+                            (Some(Action::Change), Motion::Word) => {
+                                cmd.motion = Some(Motion::End);
+                            }
+                            (Some(Action::Change), Motion::UpperWord) => {
+                                cmd.motion = Some(Motion::UpperEnd);
+                            }
+                            _ => {
+                                cmd.motion = Some(motion);
+                            }
+                        }
                         return Some(cmd.clone());
                     }
                     None => {
