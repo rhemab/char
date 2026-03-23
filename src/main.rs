@@ -10,7 +10,7 @@ use ratatui::{
     widgets::Block,
 };
 
-use ropey::Rope;
+use ropey::{Rope, RopeSlice};
 
 use crate::commands::*;
 
@@ -69,6 +69,10 @@ impl Default for Mode {
 
 fn file_position(y: usize, rope: &Rope) -> String {
     let lines = rope.len_lines().saturating_sub(2);
+
+    if lines == 0 {
+        return "Top".to_string();
+    }
 
     if y == 0 {
         return "Top".to_string();
@@ -142,12 +146,6 @@ impl App {
         let start_line_idx = self.top_line;
         let end_line_idx = (start_line_idx + height).min(self.rope.len_lines());
 
-        // get visual selection range
-        // convert that to ropey idx range
-        // push all text before range to ratatui
-        // push visual selection text to ratatui with style
-        // push the rest of the text
-
         let start_select_rng = self
             .visual_selection
             .ancor
@@ -156,12 +154,6 @@ impl App {
             .visual_selection
             .ancor
             .max(self.visual_selection.cursor);
-
-        // get each line
-        // check the idx at the end of the line
-        // if found start select rng, create spans with styles
-        // continue until found end select rng
-        // push the rest of the lines
 
         // convert rope slice to ratatui line
         let mut lines = Vec::new();
@@ -348,7 +340,8 @@ impl App {
             },
             Mode::Insert => self.insert_text(key_event),
             _ => {
-                if let Some(command) = self.parser.generate_command(key_event) {
+                let visual_mode = self.mode == Mode::Visual;
+                if let Some(command) = self.parser.generate_command(key_event, visual_mode) {
                     self.parser.reset();
 
                     eprintln!("Command: {:?}", command);
@@ -399,11 +392,16 @@ impl App {
                         }
                         Some(Motion::Append) => {
                             self.cursor_pos.x += 1;
+                            self.command_bar.clear();
+                            self.command_bar.push_str("-- INSERT --");
                             self.mode = Mode::Insert;
                             return;
                         }
                         Some(Motion::UpperAppend) => {
-                            if is_empty_line(char_idx, &self.rope) {
+                            let rope_line = self.rope.line(self.cursor_pos.y);
+                            self.command_bar.clear();
+                            self.command_bar.push_str("-- INSERT --");
+                            if is_empty_line(&rope_line) {
                                 self.mode = Mode::Insert;
                                 return;
                             }
@@ -414,7 +412,7 @@ impl App {
                             return;
                         }
                         Some(Motion::Left) => {
-                            if is_empty_line(char_idx, &self.rope) {
+                            if self.cursor_pos.x == 0 {
                                 return;
                             }
                             let mut cursor_adjust = 0;
@@ -433,7 +431,8 @@ impl App {
                             self.cursor_pos.x = self.cursor_pos.x.saturating_sub(count);
                         }
                         Some(Motion::Right) => {
-                            if is_empty_line(char_idx, &self.rope) {
+                            let rope_line = self.rope.line(self.cursor_pos.y);
+                            if is_empty_line(&rope_line) {
                                 return;
                             }
                             range = (
@@ -532,7 +531,8 @@ impl App {
                             should_update_preferred_x = true;
                         }
                         Some(Motion::LineEnd) => {
-                            if is_empty_line(char_idx, &self.rope) {
+                            let rope_line = self.rope.line(self.cursor_pos.y);
+                            if is_empty_line(&rope_line) {
                                 return;
                             }
                             cursor_target_idx = line_end_idx(char_idx, &self.rope);
@@ -568,6 +568,17 @@ impl App {
                     // check for action
                     match command.action {
                         Some(Action::Delete) => {
+                            if visual_mode {
+                                let start_select_rng = self
+                                    .visual_selection
+                                    .ancor
+                                    .min(self.visual_selection.cursor);
+                                let end_select_rng = self
+                                    .visual_selection
+                                    .ancor
+                                    .max(self.visual_selection.cursor);
+                                range = (start_select_rng, end_select_rng + 1);
+                            }
                             // delete range
                             self.rope.remove(range.0..range.1);
                             cursor_target_idx = range.0;
@@ -680,6 +691,9 @@ impl App {
     }
 
     fn ensure_valid_normal_pos(&mut self) {
+        if self.mode == Mode::Visual {
+            return;
+        }
         let line = self.rope.line(self.cursor_pos.y);
         let line_len = line.len_chars();
 
@@ -705,7 +719,7 @@ impl App {
 
     fn update_cursor_from_char_idx(&mut self, char_idx: usize) {
         let total_chars = self.rope.len_chars();
-        let safe_idx = char_idx.min(total_chars.saturating_sub(2));
+        let safe_idx = char_idx.min(total_chars.saturating_sub(1));
 
         self.cursor_pos.y = self.rope.char_to_line(safe_idx);
         self.cursor_pos.x = safe_idx - self.rope.line_to_char(self.cursor_pos.y);
@@ -714,18 +728,14 @@ impl App {
 
 // helpers
 fn is_end_of_line(idx: usize, rope: &Rope) -> bool {
-    let len = rope.len_chars();
-    if idx >= len {
-        return true;
-    }
-    rope.char(idx) == '\n' || idx + 1 >= len || rope.char(idx + 1) == '\n'
+    rope.char(idx) == '\n'
 }
 
-fn is_empty_line(idx: usize, rope: &Rope) -> bool {
-    let len = rope.len_chars();
-    if rope.char(idx) == '\n' && idx + 1 < len && rope.char(idx + 1) == '\n' {
+fn is_empty_line(rope_line: &RopeSlice) -> bool {
+    if rope_line.len_chars() == 1 {
         return true;
     }
+
     false
 }
 
@@ -753,7 +763,7 @@ fn cursor_up_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
     let line_len = target_line.len_chars();
 
     // prevent x from exceeding the line length
-    let target_x = cursor_pos.x.min(line_len.saturating_sub(2));
+    let target_x = cursor_pos.x.min(line_len.saturating_sub(1));
     return i + target_x;
 }
 
@@ -768,7 +778,7 @@ fn cursor_down_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
         let line_len = target_line.len_chars();
 
         // prevent x from exceeding the line length
-        let target_x = cursor_pos.x.min(line_len.saturating_sub(2));
+        let target_x = cursor_pos.x.min(line_len.saturating_sub(1));
         return i + target_x;
     } else {
         // go to last line
@@ -779,7 +789,7 @@ fn cursor_down_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
         let line_len = target_line.len_chars();
 
         // prevent x from exceeding the line length
-        let target_x = cursor_pos.x.min(line_len.saturating_sub(2));
+        let target_x = cursor_pos.x.min(line_len.saturating_sub(1));
         rope.line_to_char(target_y) + target_x
     }
 }
@@ -1003,17 +1013,11 @@ fn upper_back_word_idx(mut idx: usize, rope: &Rope) -> usize {
 }
 
 fn line_start_idx(current_line: usize, rope: &Rope) -> usize {
-    // get char idx of cursor.y
     rope.line_to_char(current_line)
 }
 
-fn line_end_idx(current_idx: usize, rope: &Rope) -> usize {
-    let len = rope.len_chars();
-    let mut idx = current_idx;
-    while idx < len {
-        if is_end_of_line(idx, rope) {
-            break;
-        }
+fn line_end_idx(mut idx: usize, rope: &Rope) -> usize {
+    while !is_end_of_line(idx, rope) {
         idx += 1;
     }
 
@@ -1021,7 +1025,7 @@ fn line_end_idx(current_idx: usize, rope: &Rope) -> usize {
 }
 
 fn file_end_idx(rope: &Rope) -> usize {
-    rope.line_to_char(rope.len_lines().saturating_sub(2))
+    rope.len_chars().saturating_sub(2)
 }
 
 fn new_line_below_idx(cursor_pos: &CursorPos, rope: &Rope) -> (usize, String) {

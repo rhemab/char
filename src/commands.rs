@@ -72,7 +72,7 @@ impl Parser {
         self.command = None;
     }
 
-    pub fn generate_command(&mut self, key_event: KeyEvent) -> Option<Command> {
+    pub fn generate_command(&mut self, key_event: KeyEvent, visual_mode: bool) -> Option<Command> {
         match key_event.code {
             KeyCode::Char(c) => {
                 self.input_buffer.push(c);
@@ -94,21 +94,26 @@ impl Parser {
         }
 
         // check for action
-        if self.input_buffer.len() == 1 {
-            match (key_event.code, key_event.modifiers) {
-                (KeyCode::Char('d'), KeyModifiers::NONE) => {
-                    if let Some(cmd) = &mut self.command {
-                        cmd.action = Some(Action::Delete);
-                    } else {
-                        self.command = Some(Command {
-                            action: Some(Action::Delete),
-                            ..Default::default()
-                        })
-                    }
-                    return None;
+        match (key_event.code, key_event.modifiers) {
+            (KeyCode::Char('d'), KeyModifiers::NONE) => {
+                // if in visual mode, send delete action
+                if visual_mode {
+                    return Some(Command {
+                        action: Some(Action::Delete),
+                        ..Default::default()
+                    });
                 }
-                _ => {}
+                if let Some(cmd) = &mut self.command {
+                    cmd.action = Some(Action::Delete);
+                } else {
+                    self.command = Some(Command {
+                        action: Some(Action::Delete),
+                        ..Default::default()
+                    })
+                }
+                return None;
             }
+            _ => {}
         }
 
         // search for motion
