@@ -236,6 +236,10 @@ impl App {
                 }
 
                 // generate line numbers
+                // don't show last ropey line
+                if line_num >= self.rope.len_lines() - 1 {
+                    continue;
+                }
                 let line_number = if line_num == self.cursor_pos.y || self.mode == Mode::Command {
                     format!("{} ", line_num + 1) // absolute, 1-indexed
                 } else {
@@ -497,6 +501,18 @@ impl App {
                                 cursor_down_idx(&self.cursor_pos, self.main_height / 2, &self.rope),
                             );
                             cursor_target_idx = range.1;
+                        }
+                        Some(Motion::NextEmptyLine) => {
+                            for _ in 0..count {
+                                range = (char_idx, next_empty_line_idx(range.1, &self.rope));
+                            }
+                            cursor_target_idx = range.1;
+                        }
+                        Some(Motion::PrevEmptyLine) => {
+                            for _ in 0..count {
+                                range = (prev_empty_line_idx(range.0, &self.rope), char_idx);
+                            }
+                            cursor_target_idx = range.0;
                         }
                         Some(Motion::Word) => {
                             for _ in 0..count {
@@ -914,6 +930,36 @@ fn first_word_idx(cursor_pos: &CursorPos, rope: &Rope) -> usize {
     }
 
     first_word_idx
+}
+
+fn next_empty_line_idx(idx: usize, rope: &Rope) -> usize {
+    let mut y = rope.char_to_line(idx);
+    loop {
+        y += 1;
+        if let Some(line) = rope.get_line(y) {
+            if is_empty_line(&line) {
+                break;
+            }
+        } else {
+            return rope.line_to_char(y - 1);
+        }
+    }
+    rope.line_to_char(y)
+}
+
+fn prev_empty_line_idx(idx: usize, rope: &Rope) -> usize {
+    let mut y = rope.char_to_line(idx);
+    loop {
+        y = y.saturating_sub(1);
+        if let Some(line) = rope.get_line(y) {
+            if is_empty_line(&line) || y == 0 {
+                break;
+            }
+        } else {
+            return 0;
+        }
+    }
+    rope.line_to_char(y)
 }
 
 fn next_word_idx(mut idx: usize, rope: &Rope) -> usize {

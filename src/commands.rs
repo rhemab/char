@@ -11,6 +11,8 @@ pub enum Motion {
     Right,
     HalfScreenDown,
     HalfScreenUp,
+    NextEmptyLine,
+    PrevEmptyLine,
     LineStart,
     LineEnd,
     FirstWord,
@@ -328,6 +330,14 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)],
         Motion::HalfScreenUp,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('}'), KeyModifiers::empty())],
+        Motion::NextEmptyLine,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('{'), KeyModifiers::empty())],
+        Motion::PrevEmptyLine,
     );
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty())],
