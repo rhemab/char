@@ -2,8 +2,6 @@
 
 An opinionated modal text editor with Vim motions, pleasant defaults and zero configuration required.
 
-## About
-
 char aims to be fast, versatile and reliable.
 
 > [!NOTE]
