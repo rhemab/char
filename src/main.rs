@@ -1,4 +1,4 @@
-use std::{env, fs, io};
+use std::{collections::HashMap, env, fs, io};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -35,8 +35,14 @@ pub struct App {
     command_bar: String,
     path: String,
     selection: VisualSelection,
-    yank_buffer: String,
+    yank_buffer: HashMap<char, YankBuffer>,
     highlight_yank: bool,
+}
+
+#[derive(Clone)]
+enum YankBuffer {
+    Chars(String),
+    Lines(String),
 }
 
 #[derive(Default, Debug)]
@@ -126,6 +132,9 @@ impl App {
             self.rope.len_lines() - 1,
             format_file_size(self.rope.len_bytes()),
         ));
+
+        self.yank_buffer
+            .insert('"', YankBuffer::Chars(String::new()));
 
         while self.mode != Mode::Exit {
             terminal.draw(|frame| self.draw(frame))?;
@@ -371,6 +380,7 @@ impl App {
 
                     eprintln!("Command: {:?}", command);
 
+                    let mut yank_lines = false;
                     let mut should_update_preferred_x = false;
                     let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
                     let mut range = (char_idx, char_idx);
@@ -581,17 +591,52 @@ impl App {
                             range = (
                                 self.rope.line_to_char(self.cursor_pos.y),
                                 self.rope.line_to_char(self.cursor_pos.y + 1),
-                            )
+                            );
+                            yank_lines = true;
                         }
                         Some(Motion::ChangeLine) => {
                             range = (
                                 self.rope.line_to_char(self.cursor_pos.y),
                                 self.rope.line_to_char(self.cursor_pos.y + 1) - 1,
-                            )
+                            );
+                            yank_lines = true;
                         }
                         Some(Motion::Paste) => {
-                            self.rope.insert(char_idx, &self.yank_buffer);
-                            cursor_target_idx = char_idx + self.yank_buffer.len();
+                            if let Some(buf) = self.yank_buffer.get(&'"') {
+                                match buf {
+                                    YankBuffer::Chars(content) => {
+                                        // insert after cursor
+                                        self.rope.insert(char_idx + 1, &content);
+                                        cursor_target_idx = char_idx + content.len();
+                                    }
+                                    YankBuffer::Lines(content) => {
+                                        // insert line below
+                                        let idx = self.rope.line_to_char(self.cursor_pos.y + 1);
+                                        self.rope.insert(idx, &content);
+                                        cursor_target_idx = idx;
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    match command.action {
+                        Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
+                            // yank slice to buffer
+                            if let Some(slice) = self.rope.get_slice(range.0..range.1) {
+                                let new_content = if yank_lines {
+                                    YankBuffer::Lines(String::from(slice))
+                                } else {
+                                    YankBuffer::Chars(String::from(slice))
+                                };
+                                self.yank_buffer
+                                    .entry('"')
+                                    .and_modify(|content| *content = new_content.clone())
+                                    .or_insert(new_content);
+                                self.selection.cursor = range.0;
+                                self.selection.ancor = range.1.saturating_sub(1);
+                            }
                         }
                         _ => {}
                     }
@@ -599,9 +644,6 @@ impl App {
                     // check for action
                     match command.action {
                         Some(Action::Yank) => {
-                            self.yank_buffer = self.rope.slice(range.0..range.1).to_string();
-                            self.selection.cursor = range.0;
-                            self.selection.ancor = range.1.saturating_sub(1);
                             self.highlight_yank = true;
                             return;
                         }
@@ -820,7 +862,6 @@ fn cursor_right_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize 
 }
 
 fn cursor_up_idx(cursor_pos: &CursorPos, count: usize, rope: &Rope) -> usize {
-    // rope.line_to_char(cursor_pos.y.saturating_sub(count))
     let target_y = cursor_pos.y.saturating_sub(count);
     let i = rope.line_to_char(target_y);
 
