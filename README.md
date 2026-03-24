@@ -1,6 +1,6 @@
 # char _
 
-A modal text editor with Vim motions and zero configuration required.
+An opinionated modal text editor with Vim motions, pleasant defaults and zero configuration required.
 
 ## About
 
