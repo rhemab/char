@@ -32,10 +32,12 @@ pub enum Motion {
     Append,
     UpperAppend,
     EnterCommandMode,
+    EnterSearchMode,
     DeleteLine,
     ChangeLine,
     YankLine,
     Paste,
+    UpperPaste,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -245,6 +247,10 @@ fn generate_trie() -> TrieNode {
         Motion::EnterCommandMode,
     );
     trie.insert(
+        &[KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty())],
+        Motion::EnterSearchMode,
+    );
+    trie.insert(
         &[
             KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
             KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
@@ -342,6 +348,10 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty())],
         Motion::Paste,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('P'), KeyModifiers::empty())],
+        Motion::UpperPaste,
     );
 
     trie

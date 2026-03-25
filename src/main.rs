@@ -67,6 +67,7 @@ enum Mode {
     // VisualLine,
     // VisualBlock,
     Command,
+    Search,
     Exit,
 }
 
@@ -145,7 +146,7 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         match self.mode {
-            Mode::Command => {
+            Mode::Command | Mode::Search => {
                 self.cursor_pos.y = self.main_height + 2;
                 self.cursor_pos.x = self.command_bar.len();
             }
@@ -240,7 +241,10 @@ impl App {
                 if line_num >= self.rope.len_lines() - 1 {
                     continue;
                 }
-                let line_number = if line_num == self.cursor_pos.y || self.mode == Mode::Command {
+                let line_number = if line_num == self.cursor_pos.y
+                    || self.mode == Mode::Command
+                    || self.mode == Mode::Search
+                {
                     format!("{} ", line_num + 1) // absolute, 1-indexed
                 } else {
                     format!(
@@ -261,12 +265,12 @@ impl App {
         let [num_col, gap_col, text_area] = horizontal.areas(main_area);
 
         let x_offset = digits + gap as u32;
-        let cursor_x = if self.mode == Mode::Command {
+        let cursor_x = if self.mode == Mode::Command || self.mode == Mode::Search {
             self.cursor_pos.x
         } else {
             self.cursor_pos.x + x_offset as usize
         };
-        let cursor_y = if self.mode == Mode::Command {
+        let cursor_y = if self.mode == Mode::Command || self.mode == Mode::Search {
             self.cursor_pos.y
         } else {
             self.cursor_pos.y.saturating_sub(self.top_line)
@@ -280,7 +284,7 @@ impl App {
         } else {
             Line::from(self.path.clone()).left_aligned()
         };
-        let cursor_location_content = if self.mode != Mode::Command {
+        let cursor_location_content = if self.mode != Mode::Command && self.mode != Mode::Search {
             Line::from(format!(
                 "{},{}    {}",
                 self.cursor_pos.y + 1,
@@ -341,7 +345,7 @@ impl App {
                         // if exiting insert mode, move cursor left 1
                         self.cursor_pos.x = self.cursor_pos.x.saturating_sub(1);
                     }
-                    Mode::Command => {
+                    Mode::Command | Mode::Search => {
                         // if exiting command mode put cursor back
                         self.cursor_pos.y = self.cursor_pos.preferred_y;
                         self.cursor_pos.x = self.cursor_pos.preferred_x;
@@ -354,17 +358,36 @@ impl App {
             _ => {}
         }
         match &mut self.mode {
-            Mode::Command => match key_event.code {
-                KeyCode::Enter => match self.command_bar.as_str() {
-                    ":q" => {
-                        self.exit();
+            Mode::Command | Mode::Search => match key_event.code {
+                KeyCode::Enter => {
+                    match self.command_bar.as_str() {
+                        ":q" => {
+                            self.exit();
+                            return;
+                        }
+                        _ => {
+                            if self.mode == Mode::Search {
+                                let query = &self.command_bar.as_str()[1..];
+                                let mut y = self.cursor_pos.preferred_y;
+                                let mut x = self.cursor_pos.preferred_x;
+                                let lines = self.rope.lines_at(y);
+                                for line in lines {
+                                    if let Some(x_coor) = line.to_string().find(&query) {
+                                        x = x_coor;
+                                        break;
+                                    }
+                                    y += 1;
+                                }
+                                self.cursor_pos.preferred_y = y;
+                                self.cursor_pos.preferred_x = x;
+                            }
+                        }
                     }
-                    _ => {
-                        self.cursor_pos.y = self.cursor_pos.preferred_y;
-                        self.cursor_pos.x = self.cursor_pos.preferred_x;
-                        self.return_to_normal_mode();
-                    }
-                },
+                    self.cursor_pos.y = self.cursor_pos.preferred_y;
+                    self.cursor_pos.x = self.cursor_pos.preferred_x;
+                    self.return_to_normal_mode();
+                    self.scroll();
+                }
                 KeyCode::Char(c) => self.command_bar.push(c),
                 KeyCode::Backspace => {
                     self.command_bar.pop();
@@ -396,6 +419,12 @@ impl App {
 
                     // check for motion
                     match command.motion {
+                        Some(Motion::EnterSearchMode) => {
+                            self.cursor_pos.preferred_y = self.cursor_pos.y;
+                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            self.change_mode(Mode::Search);
+                            return;
+                        }
                         Some(Motion::EnterCommandMode) => {
                             self.cursor_pos.preferred_y = self.cursor_pos.y;
                             self.cursor_pos.preferred_x = self.cursor_pos.x;
@@ -634,6 +663,25 @@ impl App {
                                 }
                             }
                         }
+                        Some(Motion::UpperPaste) => {
+                            if let Some(buf) = self.yank_buffer.get(&'"') {
+                                match buf {
+                                    YankBuffer::Chars(content) => {
+                                        // insert before cursor
+                                        self.rope.insert(char_idx, &content);
+                                        cursor_target_idx = char_idx + content.len() - 1;
+                                    }
+                                    YankBuffer::Lines(content) => {
+                                        // insert line above
+                                        let idx = self
+                                            .rope
+                                            .line_to_char(self.cursor_pos.y.saturating_sub(1));
+                                        self.rope.insert(idx, &content);
+                                        cursor_target_idx = idx;
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     }
 
@@ -796,6 +844,10 @@ impl App {
             Mode::Normal => {
                 self.command_bar.clear();
             }
+            Mode::Search => {
+                self.command_bar.clear();
+                self.command_bar.push_str("/");
+            }
             Mode::Command => {
                 self.command_bar.clear();
                 self.command_bar.push_str(":");
@@ -818,26 +870,27 @@ impl App {
         if self.mode == Mode::Visual {
             return;
         }
-        let line = self.rope.line(self.cursor_pos.y);
-        let line_len = line.len_chars();
+        if let Some(line) = self.rope.get_line(self.cursor_pos.y) {
+            let line_len = line.len_chars();
 
-        // If the line is "Hello\n", len is 6.
-        // In Insert mode, x can be 5 (after 'o').
-        // In Normal mode, x must be at most 4 ('o').
+            // If the line is "Hello\n", len is 6.
+            // In Insert mode, x can be 5 (after 'o').
+            // In Normal mode, x must be at most 4 ('o').
 
-        let has_newline =
-            line_len > 0 && (line.char(line_len - 1) == '\n' || line.char(line_len - 1) == '\r');
+            let has_newline = line_len > 0
+                && (line.char(line_len - 1) == '\n' || line.char(line_len - 1) == '\r');
 
-        let max_x = if has_newline {
-            // -1 to get index, -1 to stay off the \n
-            line_len.saturating_sub(2)
-        } else {
-            // If no newline (EOF), just -1 for index
-            line_len.saturating_sub(1)
-        };
+            let max_x = if has_newline {
+                // -1 to get index, -1 to stay off the \n
+                line_len.saturating_sub(2)
+            } else {
+                // If no newline (EOF), just -1 for index
+                line_len.saturating_sub(1)
+            };
 
-        if self.cursor_pos.x > max_x {
-            self.cursor_pos.x = max_x;
+            if self.cursor_pos.x > max_x {
+                self.cursor_pos.x = max_x;
+            }
         }
     }
 
