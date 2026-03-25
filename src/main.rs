@@ -37,6 +37,8 @@ pub struct App {
     selection: VisualSelection,
     yank_buffer: HashMap<char, YankBuffer>,
     highlight_yank: bool,
+    search_results: Vec<CursorPos>,
+    search_result_idx: usize,
 }
 
 #[derive(Clone)]
@@ -367,19 +369,23 @@ impl App {
                         }
                         _ => {
                             if self.mode == Mode::Search {
+                                self.search_results.clear();
                                 let query = &self.command_bar.as_str()[1..];
                                 let mut y = self.cursor_pos.preferred_y;
-                                let mut x = self.cursor_pos.preferred_x;
                                 let lines = self.rope.lines_at(y);
                                 for line in lines {
-                                    if let Some(x_coor) = line.to_string().find(&query) {
-                                        x = x_coor;
-                                        break;
+                                    if let Some(x) = line.to_string().find(&query) {
+                                        let cursor_pos = CursorPos {
+                                            x,
+                                            y,
+                                            ..Default::default()
+                                        };
+                                        self.search_results.push(cursor_pos);
                                     }
                                     y += 1;
                                 }
-                                self.cursor_pos.preferred_y = y;
-                                self.cursor_pos.preferred_x = x;
+                                self.cursor_pos.preferred_y = self.search_results[0].y;
+                                self.cursor_pos.preferred_x = self.search_results[0].x;
                             }
                         }
                     }
@@ -680,6 +686,50 @@ impl App {
                                         cursor_target_idx = idx;
                                     }
                                 }
+                            }
+                        }
+                        Some(Motion::NextSearchResult) => {
+                            self.search_result_idx += 1;
+                            let i = self.search_result_idx;
+                            if self.search_result_idx < self.search_results.len() {
+                                self.cursor_pos.x = self.search_results[i].x;
+                                self.cursor_pos.y = self.search_results[i].y;
+                                self.cursor_pos.preferred_x = self.search_results[i].x;
+                                self.cursor_pos.preferred_y = self.search_results[i].y;
+                                self.scroll();
+                                return;
+                            } else {
+                                self.search_result_idx = 0;
+                                self.cursor_pos.x = self.search_results[0].x;
+                                self.cursor_pos.y = self.search_results[0].y;
+                                self.cursor_pos.preferred_x = self.search_results[0].x;
+                                self.cursor_pos.preferred_y = self.search_results[0].y;
+                                self.scroll();
+                                return;
+                            }
+                        }
+                        Some(Motion::PrevSearchResult) => {
+                            if self.search_result_idx == 0 {
+                                self.search_result_idx = self.search_results.len() - 1;
+                            } else {
+                                self.search_result_idx = self.search_result_idx.saturating_sub(1);
+                            }
+                            let i = self.search_result_idx;
+                            if self.search_result_idx < self.search_results.len() {
+                                self.cursor_pos.x = self.search_results[i].x;
+                                self.cursor_pos.y = self.search_results[i].y;
+                                self.cursor_pos.preferred_x = self.search_results[i].x;
+                                self.cursor_pos.preferred_y = self.search_results[i].y;
+                                self.scroll();
+                                return;
+                            } else {
+                                self.search_result_idx = 0;
+                                self.cursor_pos.x = self.search_results[0].x;
+                                self.cursor_pos.y = self.search_results[0].y;
+                                self.cursor_pos.preferred_x = self.search_results[0].x;
+                                self.cursor_pos.preferred_y = self.search_results[0].y;
+                                self.scroll();
+                                return;
                             }
                         }
                         _ => {}
