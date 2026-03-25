@@ -19,6 +19,3 @@ The high-level ambitious plan for the project, in order:
 |  4  | LSP                                                     |   ❌   |
 |  5  | Config file                                             |   ❌   |
 
-## License
-
-MIT
