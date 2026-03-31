@@ -37,8 +37,7 @@ pub struct App {
     selection: VisualSelection,
     yank_buffer: HashMap<char, YankBuffer>,
     highlight_yank: bool,
-    search_results: Vec<CursorPos>,
-    search_result_idx: usize,
+    search_results: Vec<usize>,
 }
 
 #[derive(Clone)]
@@ -151,14 +150,6 @@ impl App {
             Mode::Command | Mode::Search => {
                 self.cursor_pos.y = self.main_height + 2;
                 self.cursor_pos.x = self.command_bar.len();
-            }
-            Mode::Insert => {
-                self.command_bar.clear();
-                self.command_bar.push_str("-- INSERT --");
-            }
-            Mode::Visual => {
-                self.command_bar.clear();
-                self.command_bar.push_str("-- VISUAL --");
             }
             _ => {}
         }
@@ -371,21 +362,14 @@ impl App {
                             if self.mode == Mode::Search {
                                 self.search_results.clear();
                                 let query = &self.command_bar.as_str()[1..];
-                                let mut y = self.cursor_pos.preferred_y;
-                                let lines = self.rope.lines_at(y);
-                                for line in lines {
-                                    if let Some(x) = line.to_string().find(&query) {
-                                        let cursor_pos = CursorPos {
-                                            x,
-                                            y,
-                                            ..Default::default()
-                                        };
-                                        self.search_results.push(cursor_pos);
-                                    }
-                                    y += 1;
-                                }
-                                self.cursor_pos.preferred_y = self.search_results[0].y;
-                                self.cursor_pos.preferred_x = self.search_results[0].x;
+                                self.search_results = search(query, &self.rope.to_string());
+                                let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
+                                    + self.cursor_pos.preferred_x;
+                                let cursor_target_idx =
+                                    next_search_result_idx(char_idx, &self.search_results);
+                                self.update_cursor_from_char_idx(cursor_target_idx);
+                                self.cursor_pos.preferred_y = self.cursor_pos.y;
+                                self.cursor_pos.preferred_x = self.cursor_pos.x;
                             }
                         }
                     }
@@ -689,48 +673,12 @@ impl App {
                             }
                         }
                         Some(Motion::NextSearchResult) => {
-                            self.search_result_idx += 1;
-                            let i = self.search_result_idx;
-                            if self.search_result_idx < self.search_results.len() {
-                                self.cursor_pos.x = self.search_results[i].x;
-                                self.cursor_pos.y = self.search_results[i].y;
-                                self.cursor_pos.preferred_x = self.search_results[i].x;
-                                self.cursor_pos.preferred_y = self.search_results[i].y;
-                                self.scroll();
-                                return;
-                            } else {
-                                self.search_result_idx = 0;
-                                self.cursor_pos.x = self.search_results[0].x;
-                                self.cursor_pos.y = self.search_results[0].y;
-                                self.cursor_pos.preferred_x = self.search_results[0].x;
-                                self.cursor_pos.preferred_y = self.search_results[0].y;
-                                self.scroll();
-                                return;
-                            }
+                            cursor_target_idx =
+                                next_search_result_idx(char_idx, &self.search_results);
                         }
                         Some(Motion::PrevSearchResult) => {
-                            if self.search_result_idx == 0 {
-                                self.search_result_idx = self.search_results.len() - 1;
-                            } else {
-                                self.search_result_idx = self.search_result_idx.saturating_sub(1);
-                            }
-                            let i = self.search_result_idx;
-                            if self.search_result_idx < self.search_results.len() {
-                                self.cursor_pos.x = self.search_results[i].x;
-                                self.cursor_pos.y = self.search_results[i].y;
-                                self.cursor_pos.preferred_x = self.search_results[i].x;
-                                self.cursor_pos.preferred_y = self.search_results[i].y;
-                                self.scroll();
-                                return;
-                            } else {
-                                self.search_result_idx = 0;
-                                self.cursor_pos.x = self.search_results[0].x;
-                                self.cursor_pos.y = self.search_results[0].y;
-                                self.cursor_pos.preferred_x = self.search_results[0].x;
-                                self.cursor_pos.preferred_y = self.search_results[0].y;
-                                self.scroll();
-                                return;
-                            }
+                            cursor_target_idx =
+                                prev_search_result_idx(char_idx, &self.search_results);
                         }
                         _ => {}
                     }
@@ -892,7 +840,9 @@ impl App {
     fn change_mode(&mut self, target_mode: Mode) {
         match target_mode {
             Mode::Normal => {
-                self.command_bar.clear();
+                if self.mode != Mode::Search {
+                    self.command_bar.clear();
+                }
             }
             Mode::Search => {
                 self.command_bar.clear();
@@ -1326,4 +1276,54 @@ fn new_line_above_idx(cursor_pos: &CursorPos, rope: &Rope) -> (usize, String) {
     let line_start_char = rope.line_to_char(y);
 
     (line_start_char, whitespace)
+}
+
+fn search(query: &str, text: &str) -> Vec<usize> {
+    text.match_indices(query).map(|(i, _)| i).collect()
+}
+
+fn next_search_result_idx(mut char_idx: usize, search_results: &Vec<usize>) -> usize {
+    match search_results.binary_search(&char_idx) {
+        Ok(i) => {
+            let next = i + 1;
+            if next >= search_results.len() {
+                char_idx = search_results[0];
+            } else {
+                char_idx = search_results[next];
+            }
+        }
+        Err(i) => {
+            if i >= search_results.len() {
+                char_idx = search_results[0];
+            } else {
+                char_idx = search_results[i];
+            }
+        }
+    }
+
+    char_idx
+}
+
+fn prev_search_result_idx(mut char_idx: usize, search_results: &Vec<usize>) -> usize {
+    match search_results.binary_search(&char_idx) {
+        Ok(i) => {
+            if i == 0 {
+                let last = search_results[search_results.len() - 1];
+                char_idx = last;
+            } else {
+                char_idx = search_results[i.saturating_sub(1)];
+            }
+        }
+        Err(i) => {
+            // cursor is not on a result
+            if i == 0 {
+                let last = search_results[search_results.len() - 1];
+                char_idx = last;
+            } else {
+                char_idx = search_results[i];
+            }
+        }
+    }
+
+    char_idx
 }
