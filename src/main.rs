@@ -37,7 +37,7 @@ pub struct App {
     selection: VisualSelection,
     yank_buffer: HashMap<char, YankBuffer>,
     highlight_yank: bool,
-    search_results: Vec<usize>,
+    query: String,
 }
 
 #[derive(Clone)]
@@ -360,13 +360,12 @@ impl App {
                         }
                         _ => {
                             if self.mode == Mode::Search {
-                                self.search_results.clear();
                                 let query = &self.command_bar.as_str()[1..];
-                                self.search_results = search(query, &self.rope.to_string());
+                                self.query = query.to_string();
                                 let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
                                     + self.cursor_pos.preferred_x;
                                 let cursor_target_idx =
-                                    next_search_result_idx(char_idx, &self.search_results);
+                                    next_search_result_idx(char_idx, query, &self.rope);
                                 self.update_cursor_from_char_idx(cursor_target_idx);
                                 self.cursor_pos.preferred_y = self.cursor_pos.y;
                                 self.cursor_pos.preferred_x = self.cursor_pos.x;
@@ -674,12 +673,11 @@ impl App {
                         }
                         Some(Motion::NextSearchResult) => {
                             cursor_target_idx =
-                                next_search_result_idx(char_idx, &self.search_results);
+                                next_search_result_idx(char_idx, &self.query, &self.rope);
+                            should_update_preferred_x = true;
+                            eprintln!("idx, {}", cursor_target_idx);
                         }
-                        Some(Motion::PrevSearchResult) => {
-                            cursor_target_idx =
-                                prev_search_result_idx(char_idx, &self.search_results);
-                        }
+                        Some(Motion::PrevSearchResult) => {}
                         _ => {}
                     }
 
@@ -1282,47 +1280,26 @@ fn search(query: &str, text: &str) -> Vec<usize> {
     text.match_indices(query).map(|(i, _)| i).collect()
 }
 
-fn next_search_result_idx(mut char_idx: usize, search_results: &Vec<usize>) -> usize {
-    match search_results.binary_search(&char_idx) {
-        Ok(i) => {
-            let next = i + 1;
-            if next >= search_results.len() {
-                char_idx = search_results[0];
-            } else {
-                char_idx = search_results[next];
-            }
-        }
-        Err(i) => {
-            if i >= search_results.len() {
-                char_idx = search_results[0];
-            } else {
-                char_idx = search_results[i];
-            }
-        }
+fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
+    // search to the end of the line
+    let mut line_idx = rope.char_to_line(char_idx);
+    let current_line = rope.line(line_idx);
+    let start = char_idx + 1;
+    let end = char_idx + current_line.len_chars();
+    if let Some(idx) = rope.slice(start..end).to_string().find(query) {
+        return start + idx;
     }
 
-    char_idx
-}
-
-fn prev_search_result_idx(mut char_idx: usize, search_results: &Vec<usize>) -> usize {
-    match search_results.binary_search(&char_idx) {
-        Ok(i) => {
-            if i == 0 {
-                let last = search_results[search_results.len() - 1];
-                char_idx = last;
-            } else {
-                char_idx = search_results[i.saturating_sub(1)];
-            }
+    // search line by line
+    let mut line_buf = String::with_capacity(100);
+    let total_lines = rope.len_lines();
+    line_idx += 1;
+    while line_idx < total_lines {
+        line_buf = rope.line(line_idx).to_string();
+        if let Some(idx) = line_buf.find(query) {
+            return rope.line_to_char(line_idx) + idx;
         }
-        Err(i) => {
-            // cursor is not on a result
-            if i == 0 {
-                let last = search_results[search_results.len() - 1];
-                char_idx = last;
-            } else {
-                char_idx = search_results[i];
-            }
-        }
+        line_idx += 1;
     }
 
     char_idx
