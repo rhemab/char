@@ -675,9 +675,12 @@ impl App {
                             cursor_target_idx =
                                 next_search_result_idx(char_idx, &self.query, &self.rope);
                             should_update_preferred_x = true;
-                            eprintln!("idx, {}", cursor_target_idx);
                         }
-                        Some(Motion::PrevSearchResult) => {}
+                        Some(Motion::PrevSearchResult) => {
+                            cursor_target_idx =
+                                prev_search_result_idx(char_idx, &self.query, &self.rope);
+                            should_update_preferred_x = true;
+                        }
                         _ => {}
                     }
 
@@ -1291,15 +1294,38 @@ fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     }
 
     // search line by line
-    let mut line_buf = String::with_capacity(100);
+    let mut text = String::with_capacity(100);
     let total_lines = rope.len_lines();
     line_idx += 1;
     while line_idx < total_lines {
-        line_buf = rope.line(line_idx).to_string();
-        if let Some(idx) = line_buf.find(query) {
+        text = rope.line(line_idx).to_string();
+        if let Some(idx) = text.find(query) {
             return rope.line_to_char(line_idx) + idx;
         }
         line_idx += 1;
+    }
+
+    char_idx
+}
+
+fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
+    // search from the start of the line
+    let mut line_idx = rope.char_to_line(char_idx);
+    let current_line = rope.line(line_idx);
+    let start = rope.line_to_char(line_idx);
+    let end = char_idx;
+    if let Some(idx) = rope.slice(start..end).to_string().rfind(query) {
+        return start + idx;
+    }
+
+    // search line by line
+    let mut text = String::with_capacity(100);
+    while line_idx > 0 {
+        line_idx = line_idx.saturating_sub(1);
+        text = rope.line(line_idx).to_string();
+        if let Some(idx) = text.rfind(query) {
+            return rope.line_to_char(line_idx) + idx;
+        }
     }
 
     char_idx
