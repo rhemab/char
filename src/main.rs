@@ -25,6 +25,7 @@ fn main() -> color_eyre::Result<()> {
 
 #[derive(Default)]
 pub struct App {
+    redraw: bool,
     dirty: bool,
     mode: Mode,
     parser: Parser,
@@ -146,6 +147,9 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        if self.highlight_yank {
+            self.redraw = true;
+        }
         match self.mode {
             Mode::Command | Mode::Search => {
                 self.cursor_pos.y = self.main_height + 2;
@@ -318,6 +322,15 @@ impl App {
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
+        if self.redraw {
+            match event::poll(std::time::Duration::from_millis(150)) {
+                Ok(false) => {
+                    self.redraw = false;
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
         match event::read()? {
             // it's important to check that the event is a key press event as
             // crossterm also emits key release and repeat events on Windows.
