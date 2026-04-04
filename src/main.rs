@@ -721,6 +721,8 @@ impl App {
                     match command.action {
                         Some(Action::Yank) => {
                             self.highlight_yank = true;
+                            self.cursor_pos.preferred_x = self.cursor_pos.x;
+                            self.cursor_pos.preferred_y = self.cursor_pos.y;
                             return;
                         }
                         Some(Action::Delete) | Some(Action::Change) => {
