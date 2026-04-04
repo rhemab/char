@@ -88,8 +88,13 @@ impl Parser {
                 // check for number
                 if let Some(n) = c.to_digit(10) {
                     if let Some(cmd) = &mut self.command {
-                        cmd.count.push(c);
-                        return None;
+                        match (cmd.action, n) {
+                            (Some(Action::Yank), 0) => {}
+                            _ => {
+                                cmd.count.push(c);
+                                return None;
+                            }
+                        }
                     } else if n != 0 {
                         self.command = Some(Command {
                             count: String::from(c),
