@@ -25,6 +25,8 @@ fn main() -> color_eyre::Result<()> {
 
 #[derive(Default)]
 pub struct App {
+    last_command: commands::Command,
+    last_insertion: String,
     redraw: bool,
     dirty: bool,
     mode: Mode,
@@ -405,362 +407,365 @@ impl App {
             _ => {
                 let visual_mode = self.mode == Mode::Visual;
                 if let Some(command) = self.parser.generate_command(key_event, visual_mode) {
-                    self.parser.reset();
+                    self.execute_command(command, visual_mode);
+                }
+            }
+        }
+    }
 
-                    eprintln!("Command: {:?}", command);
+    fn execute_command(&mut self, command: commands::Command, visual_mode: bool) {
+        self.parser.reset();
 
-                    let mut yank_lines = false;
-                    let mut should_update_preferred_x = false;
-                    let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-                    let mut range = (char_idx, char_idx);
-                    let mut cursor_target_idx = char_idx;
-                    let mut count = 1;
-                    if let Ok(n) = command.count.parse::<usize>() {
-                        count = n;
+        eprintln!("Command: {:?}", command);
+
+        let mut yank_lines = false;
+        let mut should_update_preferred_x = false;
+        let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
+        let mut range = (char_idx, char_idx);
+        let mut cursor_target_idx = char_idx;
+        let mut count = 1;
+        if let Ok(n) = command.count.parse::<usize>() {
+            count = n;
+        }
+
+        // check for motion
+        match command.motion {
+            Some(Motion::EnterSearchMode) => {
+                self.cursor_pos.preferred_y = self.cursor_pos.y;
+                self.cursor_pos.preferred_x = self.cursor_pos.x;
+                self.change_mode(Mode::Search);
+                return;
+            }
+            Some(Motion::EnterCommandMode) => {
+                self.cursor_pos.preferred_y = self.cursor_pos.y;
+                self.cursor_pos.preferred_x = self.cursor_pos.x;
+                self.change_mode(Mode::Command);
+                return;
+            }
+            Some(Motion::FileStart) => {
+                range = (0, char_idx);
+                cursor_target_idx = 0;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::VisualMode) => {
+                self.selection.ancor = char_idx;
+                self.selection.cursor = char_idx;
+                self.change_mode(Mode::Visual);
+                return;
+            }
+            Some(Motion::InsertMode) => {
+                self.change_mode(Mode::Insert);
+                return;
+            }
+            Some(Motion::UpperInsert) => {
+                cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
+                self.update_cursor_from_char_idx(cursor_target_idx);
+                self.change_mode(Mode::Insert);
+                return;
+            }
+            Some(Motion::Append) => {
+                self.cursor_pos.x += 1;
+                self.change_mode(Mode::Insert);
+                return;
+            }
+            Some(Motion::UpperAppend) => {
+                let rope_line = self.rope.line(self.cursor_pos.y);
+                if is_empty_line(&rope_line) {
+                    self.change_mode(Mode::Insert);
+                    return;
+                }
+                cursor_target_idx = line_end_idx(char_idx, &self.rope);
+                self.update_cursor_from_char_idx(cursor_target_idx);
+                self.cursor_pos.x += 1;
+                self.change_mode(Mode::Insert);
+                return;
+            }
+            Some(Motion::Left) => {
+                if self.cursor_pos.x == 0 {
+                    return;
+                }
+                let mut cursor_adjust = 0;
+                match command.action {
+                    Some(Action::Delete) => {
+                        cursor_adjust = count;
                     }
-
-                    // check for motion
-                    match command.motion {
-                        Some(Motion::EnterSearchMode) => {
-                            self.cursor_pos.preferred_y = self.cursor_pos.y;
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
-                            self.change_mode(Mode::Search);
-                            return;
+                    _ => {}
+                }
+                range = (
+                    cursor_left_idx(&self.cursor_pos, count, &self.rope),
+                    char_idx,
+                );
+                cursor_target_idx = range.0.saturating_sub(cursor_adjust);
+                should_update_preferred_x = true;
+                self.cursor_pos.x = self.cursor_pos.x.saturating_sub(count);
+            }
+            Some(Motion::Right) => {
+                let rope_line = self.rope.line(self.cursor_pos.y);
+                if is_empty_line(&rope_line) {
+                    return;
+                }
+                range = (
+                    char_idx,
+                    cursor_right_idx(&self.cursor_pos, count, &self.rope),
+                );
+                cursor_target_idx = range.1;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::Up) => {
+                // dk should delete two whole lines
+                self.cursor_pos.x = self.cursor_pos.preferred_x;
+                range = (char_idx, cursor_up_idx(&self.cursor_pos, count, &self.rope));
+                cursor_target_idx = range.1;
+            }
+            Some(Motion::Down) => {
+                // dj should delete two whole lines
+                self.cursor_pos.x = self.cursor_pos.preferred_x;
+                range = (
+                    char_idx,
+                    cursor_down_idx(&self.cursor_pos, count, &self.rope),
+                );
+                cursor_target_idx = range.1;
+            }
+            Some(Motion::HalfScreenUp) => {
+                self.cursor_pos.x = self.cursor_pos.preferred_x;
+                range = (
+                    char_idx,
+                    cursor_up_idx(&self.cursor_pos, self.main_height / 2, &self.rope),
+                );
+                cursor_target_idx = range.1;
+            }
+            Some(Motion::HalfScreenDown) => {
+                self.cursor_pos.x = self.cursor_pos.preferred_x;
+                range = (
+                    char_idx,
+                    cursor_down_idx(&self.cursor_pos, self.main_height / 2, &self.rope),
+                );
+                cursor_target_idx = range.1;
+            }
+            Some(Motion::NextEmptyLine) => {
+                for _ in 0..count {
+                    range = (char_idx, next_empty_line_idx(range.1, &self.rope));
+                }
+                cursor_target_idx = range.1;
+            }
+            Some(Motion::PrevEmptyLine) => {
+                for _ in 0..count {
+                    range = (prev_empty_line_idx(range.0, &self.rope), char_idx);
+                }
+                cursor_target_idx = range.0;
+            }
+            Some(Motion::Word) => {
+                for _ in 0..count {
+                    range = (char_idx, next_word_idx(range.1, &self.rope));
+                }
+                cursor_target_idx = range.1;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::UpperWord) => {
+                for _ in 0..count {
+                    range = (char_idx, upper_word_idx(range.1, &self.rope));
+                }
+                cursor_target_idx = range.1;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::End) => {
+                let mut range_end = char_idx;
+                for _ in 0..count {
+                    range_end = word_end_idx(range_end, &self.rope);
+                }
+                range = (char_idx, range_end + 1);
+                cursor_target_idx = range_end;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::UpperEnd) => {
+                for _ in 0..count {
+                    range = (char_idx, upper_word_end_idx(range.1, &self.rope));
+                }
+                cursor_target_idx = range.1;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::Back) => {
+                for _ in 0..count {
+                    range = (prev_word_idx(range.0, &self.rope), char_idx);
+                }
+                cursor_target_idx = range.0;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::UpperBack) => {
+                for _ in 0..count {
+                    range = (upper_back_word_idx(range.0, &self.rope), char_idx);
+                }
+                cursor_target_idx = range.0;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::FirstWord) => {
+                cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
+                range = (
+                    char_idx.min(cursor_target_idx),
+                    char_idx.max(cursor_target_idx),
+                );
+                should_update_preferred_x = true;
+            }
+            Some(Motion::LineStart) => {
+                range = (line_start_idx(self.cursor_pos.y, &self.rope), char_idx);
+                cursor_target_idx = range.0;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::LineEnd) => {
+                let rope_line = self.rope.line(self.cursor_pos.y);
+                if is_empty_line(&rope_line) {
+                    return;
+                }
+                cursor_target_idx = line_end_idx(char_idx, &self.rope);
+                range = (char_idx, cursor_target_idx);
+                self.cursor_pos.preferred_x = usize::MAX;
+            }
+            Some(Motion::FileEnd) => {
+                range = (char_idx, file_end_idx(&self.rope));
+                cursor_target_idx = range.1;
+                should_update_preferred_x = true;
+            }
+            Some(Motion::NewLineBelow) => {
+                let (insert_pos, whitespace) = new_line_below_idx(&self.cursor_pos, &self.rope);
+                self.rope.insert(insert_pos, &format!("\n{}", whitespace));
+                self.cursor_pos.y += 1;
+                self.cursor_pos.x = whitespace.chars().count();
+                self.change_mode(Mode::Insert);
+                return;
+            }
+            Some(Motion::NewLineAbove) => {
+                let (insert_pos, whitespace) = new_line_above_idx(&self.cursor_pos, &self.rope);
+                let insert_str = format!("{}\n", whitespace);
+                self.rope.insert(insert_pos, &insert_str);
+                self.cursor_pos.x = whitespace.chars().count();
+                self.change_mode(Mode::Insert);
+                return;
+            }
+            Some(Motion::DeleteLine) | Some(Motion::YankLine) => {
+                range = (
+                    self.rope.line_to_char(self.cursor_pos.y),
+                    self.rope.line_to_char(self.cursor_pos.y + 1),
+                );
+                yank_lines = true;
+            }
+            Some(Motion::ChangeLine) => {
+                range = (
+                    self.rope.line_to_char(self.cursor_pos.y),
+                    self.rope.line_to_char(self.cursor_pos.y + 1) - 1,
+                );
+                yank_lines = true;
+            }
+            Some(Motion::Paste) => {
+                if let Some(buf) = self.yank_buffer.get(&'"') {
+                    match buf {
+                        YankBuffer::Chars(content) => {
+                            // insert after cursor
+                            self.rope.insert(char_idx + 1, &content);
+                            cursor_target_idx = char_idx + content.len();
                         }
-                        Some(Motion::EnterCommandMode) => {
-                            self.cursor_pos.preferred_y = self.cursor_pos.y;
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
-                            self.change_mode(Mode::Command);
-                            return;
+                        YankBuffer::Lines(content) => {
+                            // insert line below
+                            let idx = self.rope.line_to_char(self.cursor_pos.y + 1);
+                            self.rope.insert(idx, &content);
+                            cursor_target_idx = idx;
                         }
-                        Some(Motion::FileStart) => {
-                            range = (0, char_idx);
-                            cursor_target_idx = 0;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::VisualMode) => {
-                            self.selection.ancor = char_idx;
-                            self.selection.cursor = char_idx;
-                            self.change_mode(Mode::Visual);
-                            return;
-                        }
-                        Some(Motion::InsertMode) => {
-                            self.change_mode(Mode::Insert);
-                            return;
-                        }
-                        Some(Motion::UpperInsert) => {
-                            cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.change_mode(Mode::Insert);
-                            return;
-                        }
-                        Some(Motion::Append) => {
-                            self.cursor_pos.x += 1;
-                            self.change_mode(Mode::Insert);
-                            return;
-                        }
-                        Some(Motion::UpperAppend) => {
-                            let rope_line = self.rope.line(self.cursor_pos.y);
-                            if is_empty_line(&rope_line) {
-                                self.change_mode(Mode::Insert);
-                                return;
-                            }
-                            cursor_target_idx = line_end_idx(char_idx, &self.rope);
-                            self.update_cursor_from_char_idx(cursor_target_idx);
-                            self.cursor_pos.x += 1;
-                            self.change_mode(Mode::Insert);
-                            return;
-                        }
-                        Some(Motion::Left) => {
-                            if self.cursor_pos.x == 0 {
-                                return;
-                            }
-                            let mut cursor_adjust = 0;
-                            match command.action {
-                                Some(Action::Delete) => {
-                                    cursor_adjust = count;
-                                }
-                                _ => {}
-                            }
-                            range = (
-                                cursor_left_idx(&self.cursor_pos, count, &self.rope),
-                                char_idx,
-                            );
-                            cursor_target_idx = range.0.saturating_sub(cursor_adjust);
-                            should_update_preferred_x = true;
-                            self.cursor_pos.x = self.cursor_pos.x.saturating_sub(count);
-                        }
-                        Some(Motion::Right) => {
-                            let rope_line = self.rope.line(self.cursor_pos.y);
-                            if is_empty_line(&rope_line) {
-                                return;
-                            }
-                            range = (
-                                char_idx,
-                                cursor_right_idx(&self.cursor_pos, count, &self.rope),
-                            );
-                            cursor_target_idx = range.1;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::Up) => {
-                            // dk should delete two whole lines
-                            self.cursor_pos.x = self.cursor_pos.preferred_x;
-                            range = (char_idx, cursor_up_idx(&self.cursor_pos, count, &self.rope));
-                            cursor_target_idx = range.1;
-                        }
-                        Some(Motion::Down) => {
-                            // dj should delete two whole lines
-                            self.cursor_pos.x = self.cursor_pos.preferred_x;
-                            range = (
-                                char_idx,
-                                cursor_down_idx(&self.cursor_pos, count, &self.rope),
-                            );
-                            cursor_target_idx = range.1;
-                        }
-                        Some(Motion::HalfScreenUp) => {
-                            self.cursor_pos.x = self.cursor_pos.preferred_x;
-                            range = (
-                                char_idx,
-                                cursor_up_idx(&self.cursor_pos, self.main_height / 2, &self.rope),
-                            );
-                            cursor_target_idx = range.1;
-                        }
-                        Some(Motion::HalfScreenDown) => {
-                            self.cursor_pos.x = self.cursor_pos.preferred_x;
-                            range = (
-                                char_idx,
-                                cursor_down_idx(&self.cursor_pos, self.main_height / 2, &self.rope),
-                            );
-                            cursor_target_idx = range.1;
-                        }
-                        Some(Motion::NextEmptyLine) => {
-                            for _ in 0..count {
-                                range = (char_idx, next_empty_line_idx(range.1, &self.rope));
-                            }
-                            cursor_target_idx = range.1;
-                        }
-                        Some(Motion::PrevEmptyLine) => {
-                            for _ in 0..count {
-                                range = (prev_empty_line_idx(range.0, &self.rope), char_idx);
-                            }
-                            cursor_target_idx = range.0;
-                        }
-                        Some(Motion::Word) => {
-                            for _ in 0..count {
-                                range = (char_idx, next_word_idx(range.1, &self.rope));
-                            }
-                            cursor_target_idx = range.1;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::UpperWord) => {
-                            for _ in 0..count {
-                                range = (char_idx, upper_word_idx(range.1, &self.rope));
-                            }
-                            cursor_target_idx = range.1;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::End) => {
-                            let mut range_end = char_idx;
-                            for _ in 0..count {
-                                range_end = word_end_idx(range_end, &self.rope);
-                            }
-                            range = (char_idx, range_end + 1);
-                            cursor_target_idx = range_end;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::UpperEnd) => {
-                            for _ in 0..count {
-                                range = (char_idx, upper_word_end_idx(range.1, &self.rope));
-                            }
-                            cursor_target_idx = range.1;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::Back) => {
-                            for _ in 0..count {
-                                range = (prev_word_idx(range.0, &self.rope), char_idx);
-                            }
-                            cursor_target_idx = range.0;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::UpperBack) => {
-                            for _ in 0..count {
-                                range = (upper_back_word_idx(range.0, &self.rope), char_idx);
-                            }
-                            cursor_target_idx = range.0;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::FirstWord) => {
-                            cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
-                            range = (
-                                char_idx.min(cursor_target_idx),
-                                char_idx.max(cursor_target_idx),
-                            );
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::LineStart) => {
-                            range = (line_start_idx(self.cursor_pos.y, &self.rope), char_idx);
-                            cursor_target_idx = range.0;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::LineEnd) => {
-                            let rope_line = self.rope.line(self.cursor_pos.y);
-                            if is_empty_line(&rope_line) {
-                                return;
-                            }
-                            cursor_target_idx = line_end_idx(char_idx, &self.rope);
-                            range = (char_idx, cursor_target_idx);
-                            self.cursor_pos.preferred_x = usize::MAX;
-                        }
-                        Some(Motion::FileEnd) => {
-                            range = (char_idx, file_end_idx(&self.rope));
-                            cursor_target_idx = range.1;
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::NewLineBelow) => {
-                            let (insert_pos, whitespace) =
-                                new_line_below_idx(&self.cursor_pos, &self.rope);
-                            self.rope.insert(insert_pos, &format!("\n{}", whitespace));
-                            self.cursor_pos.y += 1;
-                            self.cursor_pos.x = whitespace.chars().count();
-                            self.change_mode(Mode::Insert);
-                            return;
-                        }
-                        Some(Motion::NewLineAbove) => {
-                            let (insert_pos, whitespace) =
-                                new_line_above_idx(&self.cursor_pos, &self.rope);
-                            let insert_str = format!("{}\n", whitespace);
-                            self.rope.insert(insert_pos, &insert_str);
-                            self.cursor_pos.x = whitespace.chars().count();
-                            self.change_mode(Mode::Insert);
-                            return;
-                        }
-                        Some(Motion::DeleteLine) | Some(Motion::YankLine) => {
-                            range = (
-                                self.rope.line_to_char(self.cursor_pos.y),
-                                self.rope.line_to_char(self.cursor_pos.y + 1),
-                            );
-                            yank_lines = true;
-                        }
-                        Some(Motion::ChangeLine) => {
-                            range = (
-                                self.rope.line_to_char(self.cursor_pos.y),
-                                self.rope.line_to_char(self.cursor_pos.y + 1) - 1,
-                            );
-                            yank_lines = true;
-                        }
-                        Some(Motion::Paste) => {
-                            if let Some(buf) = self.yank_buffer.get(&'"') {
-                                match buf {
-                                    YankBuffer::Chars(content) => {
-                                        // insert after cursor
-                                        self.rope.insert(char_idx + 1, &content);
-                                        cursor_target_idx = char_idx + content.len();
-                                    }
-                                    YankBuffer::Lines(content) => {
-                                        // insert line below
-                                        let idx = self.rope.line_to_char(self.cursor_pos.y + 1);
-                                        self.rope.insert(idx, &content);
-                                        cursor_target_idx = idx;
-                                    }
-                                }
-                            }
-                        }
-                        Some(Motion::UpperPaste) => {
-                            if let Some(buf) = self.yank_buffer.get(&'"') {
-                                match buf {
-                                    YankBuffer::Chars(content) => {
-                                        // insert before cursor
-                                        self.rope.insert(char_idx, &content);
-                                        cursor_target_idx = char_idx + content.len() - 1;
-                                    }
-                                    YankBuffer::Lines(content) => {
-                                        // insert line above
-                                        let idx = self
-                                            .rope
-                                            .line_to_char(self.cursor_pos.y.saturating_sub(1));
-                                        self.rope.insert(idx, &content);
-                                        cursor_target_idx = idx;
-                                    }
-                                }
-                            }
-                        }
-                        Some(Motion::NextSearchResult) => {
-                            cursor_target_idx =
-                                next_search_result_idx(char_idx, &self.query, &self.rope);
-                            should_update_preferred_x = true;
-                        }
-                        Some(Motion::PrevSearchResult) => {
-                            cursor_target_idx =
-                                prev_search_result_idx(char_idx, &self.query, &self.rope);
-                            should_update_preferred_x = true;
-                        }
-                        _ => {}
-                    }
-
-                    match command.action {
-                        Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
-                            // yank slice to buffer
-                            if let Some(slice) = self.rope.get_slice(range.0..range.1) {
-                                let new_content = if yank_lines {
-                                    YankBuffer::Lines(String::from(slice))
-                                } else {
-                                    YankBuffer::Chars(String::from(slice))
-                                };
-                                self.yank_buffer
-                                    .entry('"')
-                                    .and_modify(|content| *content = new_content.clone())
-                                    .or_insert(new_content);
-                                self.selection.cursor = range.0;
-                                self.selection.ancor = range.1.saturating_sub(1);
-                            }
-                        }
-                        _ => {}
-                    }
-
-                    // check for action
-                    match command.action {
-                        Some(Action::Yank) => {
-                            self.highlight_yank = true;
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
-                            self.cursor_pos.preferred_y = self.cursor_pos.y;
-                            return;
-                        }
-                        Some(Action::Delete) | Some(Action::Change) => {
-                            if visual_mode {
-                                let start_select_rng =
-                                    self.selection.ancor.min(self.selection.cursor);
-                                let end_select_rng =
-                                    self.selection.ancor.max(self.selection.cursor);
-                                range = (start_select_rng, end_select_rng + 1);
-                            }
-                            // delete range
-                            self.rope.remove(range.0..range.1);
-                            self.cursor_pos.preferred_x = self.cursor_pos.x;
-                            cursor_target_idx = range.0;
-
-                            match command.action {
-                                Some(Action::Change) => {
-                                    self.change_mode(Mode::Insert);
-                                }
-                                _ => {
-                                    self.change_mode(Mode::Normal);
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-
-                    self.update_cursor_from_char_idx(cursor_target_idx);
-                    self.ensure_valid_normal_pos();
-                    self.selection.cursor =
-                        self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-                    self.scroll();
-
-                    if should_update_preferred_x {
-                        self.cursor_pos.preferred_x = self.cursor_pos.x;
                     }
                 }
             }
+            Some(Motion::UpperPaste) => {
+                if let Some(buf) = self.yank_buffer.get(&'"') {
+                    match buf {
+                        YankBuffer::Chars(content) => {
+                            // insert before cursor
+                            self.rope.insert(char_idx, &content);
+                            cursor_target_idx = char_idx + content.len() - 1;
+                        }
+                        YankBuffer::Lines(content) => {
+                            // insert line above
+                            let idx = self.rope.line_to_char(self.cursor_pos.y.saturating_sub(1));
+                            self.rope.insert(idx, &content);
+                            cursor_target_idx = idx;
+                        }
+                    }
+                }
+            }
+            Some(Motion::NextSearchResult) => {
+                cursor_target_idx = next_search_result_idx(char_idx, &self.query, &self.rope);
+                should_update_preferred_x = true;
+            }
+            Some(Motion::PrevSearchResult) => {
+                cursor_target_idx = prev_search_result_idx(char_idx, &self.query, &self.rope);
+                should_update_preferred_x = true;
+            }
+            Some(Motion::Repeat) => {
+                self.execute_command(self.last_command.clone(), visual_mode);
+                return;
+            }
+            _ => {}
+        }
+
+        // check for yank
+        match command.action {
+            Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
+                // yank slice to buffer
+                if let Some(slice) = self.rope.get_slice(range.0..range.1) {
+                    let new_content = if yank_lines {
+                        YankBuffer::Lines(String::from(slice))
+                    } else {
+                        YankBuffer::Chars(String::from(slice))
+                    };
+                    self.yank_buffer
+                        .entry('"')
+                        .and_modify(|content| *content = new_content.clone())
+                        .or_insert(new_content);
+                    self.selection.cursor = range.0;
+                    self.selection.ancor = range.1.saturating_sub(1);
+                }
+            }
+            _ => {}
+        }
+
+        // check for action
+        match command.action {
+            Some(Action::Yank) => {
+                self.highlight_yank = true;
+                self.cursor_pos.preferred_x = self.cursor_pos.x;
+                self.cursor_pos.preferred_y = self.cursor_pos.y;
+                return;
+            }
+            Some(Action::Delete) | Some(Action::Change) => {
+                // save command
+                self.last_command = command.clone();
+
+                if visual_mode {
+                    let start_select_rng = self.selection.ancor.min(self.selection.cursor);
+                    let end_select_rng = self.selection.ancor.max(self.selection.cursor);
+                    range = (start_select_rng, end_select_rng + 1);
+                }
+                // delete range
+                self.rope.remove(range.0..range.1);
+                self.cursor_pos.preferred_x = self.cursor_pos.x;
+                cursor_target_idx = range.0;
+
+                match command.action {
+                    Some(Action::Change) => {
+                        self.change_mode(Mode::Insert);
+                    }
+                    _ => {
+                        self.change_mode(Mode::Normal);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        self.update_cursor_from_char_idx(cursor_target_idx);
+        self.ensure_valid_normal_pos();
+        self.selection.cursor = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
+        self.scroll();
+
+        if should_update_preferred_x {
+            self.cursor_pos.preferred_x = self.cursor_pos.x;
         }
     }
 
@@ -1294,10 +1299,6 @@ fn new_line_above_idx(cursor_pos: &CursorPos, rope: &Rope) -> (usize, String) {
     (line_start_char, whitespace)
 }
 
-fn search(query: &str, text: &str) -> Vec<usize> {
-    text.match_indices(query).map(|(i, _)| i).collect()
-}
-
 fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     // search to the end of the line
     let mut line_idx = rope.char_to_line(char_idx);
@@ -1309,11 +1310,10 @@ fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     }
 
     // search line by line
-    let mut text = String::with_capacity(100);
     let total_lines = rope.len_lines();
     line_idx += 1;
     while line_idx < total_lines {
-        text = rope.line(line_idx).to_string();
+        let text = rope.line(line_idx).to_string();
         if let Some(idx) = text.find(query) {
             return rope.line_to_char(line_idx) + idx;
         }
@@ -1326,7 +1326,6 @@ fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
 fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     // search from the start of the line
     let mut line_idx = rope.char_to_line(char_idx);
-    let current_line = rope.line(line_idx);
     let start = rope.line_to_char(line_idx);
     let end = char_idx;
     if let Some(idx) = rope.slice(start..end).to_string().rfind(query) {
@@ -1334,10 +1333,9 @@ fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     }
 
     // search line by line
-    let mut text = String::with_capacity(100);
     while line_idx > 0 {
         line_idx = line_idx.saturating_sub(1);
-        text = rope.line(line_idx).to_string();
+        let text = rope.line(line_idx).to_string();
         if let Some(idx) = text.rfind(query) {
             return rope.line_to_char(line_idx) + idx;
         }

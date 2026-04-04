@@ -40,6 +40,7 @@ pub enum Motion {
     UpperPaste,
     NextSearchResult,
     PrevSearchResult,
+    Repeat,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -367,6 +368,10 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('N'), KeyModifiers::empty())],
         Motion::PrevSearchResult,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('.'), KeyModifiers::empty())],
+        Motion::Repeat,
     );
 
     trie
