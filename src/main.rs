@@ -713,7 +713,7 @@ impl App {
                 if self.mode == Mode::Insert {
                     let idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
                     self.rope.insert(idx, &self.last_insertion);
-                    self.update_cursor_from_char_idx(idx + self.last_insertion.len());
+                    self.update_cursor_from_char_idx(idx + self.last_insertion.len() - 1);
                     self.ensure_valid_normal_pos();
                 }
                 self.change_mode(Mode::Normal);
