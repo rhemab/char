@@ -407,19 +407,21 @@ impl App {
             _ => {
                 let visual_mode = self.mode == Mode::Visual;
                 if let Some(command) = self.parser.generate_command(key_event, visual_mode) {
-                    self.execute_command(command, visual_mode);
+                    self.execute_command(command, visual_mode, false);
                 }
             }
         }
     }
 
-    fn execute_command(&mut self, command: commands::Command, visual_mode: bool) {
+    fn execute_command(&mut self, command: commands::Command, visual_mode: bool, repeat: bool) {
         self.parser.reset();
 
         eprintln!("Command: {:?}", command);
 
         let mut yank_lines = false;
         let mut should_update_preferred_x = false;
+        let mut should_move_cursor = true;
+        let mut should_save_command = false;
         let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
         let mut range = (char_idx, char_idx);
         let mut cursor_target_idx = char_idx;
@@ -454,31 +456,34 @@ impl App {
                 return;
             }
             Some(Motion::InsertMode) => {
+                should_save_command = true;
                 self.change_mode(Mode::Insert);
-                return;
+                should_move_cursor = false;
             }
             Some(Motion::UpperInsert) => {
+                should_save_command = true;
                 cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
                 self.update_cursor_from_char_idx(cursor_target_idx);
                 self.change_mode(Mode::Insert);
-                return;
+                should_move_cursor = false;
             }
             Some(Motion::Append) => {
+                should_save_command = true;
                 self.cursor_pos.x += 1;
                 self.change_mode(Mode::Insert);
-                return;
+                should_move_cursor = false;
             }
             Some(Motion::UpperAppend) => {
+                should_save_command = true;
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
                     self.change_mode(Mode::Insert);
-                    return;
                 }
                 cursor_target_idx = line_end_idx(char_idx, &self.rope);
                 self.update_cursor_from_char_idx(cursor_target_idx);
                 self.cursor_pos.x += 1;
                 self.change_mode(Mode::Insert);
-                return;
+                should_move_cursor = false;
             }
             Some(Motion::Left) => {
                 if self.cursor_pos.x == 0 {
@@ -626,22 +631,25 @@ impl App {
                 should_update_preferred_x = true;
             }
             Some(Motion::NewLineBelow) => {
+                should_save_command = true;
                 let (insert_pos, whitespace) = new_line_below_idx(&self.cursor_pos, &self.rope);
                 self.rope.insert(insert_pos, &format!("\n{}", whitespace));
                 self.cursor_pos.y += 1;
                 self.cursor_pos.x = whitespace.chars().count();
                 self.change_mode(Mode::Insert);
-                return;
+                should_move_cursor = false;
             }
             Some(Motion::NewLineAbove) => {
+                should_save_command = true;
                 let (insert_pos, whitespace) = new_line_above_idx(&self.cursor_pos, &self.rope);
                 let insert_str = format!("{}\n", whitespace);
                 self.rope.insert(insert_pos, &insert_str);
                 self.cursor_pos.x = whitespace.chars().count();
                 self.change_mode(Mode::Insert);
-                return;
+                should_move_cursor = false;
             }
             Some(Motion::DeleteLine) | Some(Motion::YankLine) => {
+                should_save_command = true;
                 range = (
                     self.rope.line_to_char(self.cursor_pos.y),
                     self.rope.line_to_char(self.cursor_pos.y + 1),
@@ -649,6 +657,7 @@ impl App {
                 yank_lines = true;
             }
             Some(Motion::ChangeLine) => {
+                should_save_command = true;
                 range = (
                     self.rope.line_to_char(self.cursor_pos.y),
                     self.rope.line_to_char(self.cursor_pos.y + 1) - 1,
@@ -656,6 +665,7 @@ impl App {
                 yank_lines = true;
             }
             Some(Motion::Paste) => {
+                should_save_command = true;
                 if let Some(buf) = self.yank_buffer.get(&'"') {
                     match buf {
                         YankBuffer::Chars(content) => {
@@ -673,6 +683,7 @@ impl App {
                 }
             }
             Some(Motion::UpperPaste) => {
+                should_save_command = true;
                 if let Some(buf) = self.yank_buffer.get(&'"') {
                     match buf {
                         YankBuffer::Chars(content) => {
@@ -698,7 +709,14 @@ impl App {
                 should_update_preferred_x = true;
             }
             Some(Motion::Repeat) => {
-                self.execute_command(self.last_command.clone(), visual_mode);
+                self.execute_command(self.last_command.clone(), visual_mode, true);
+                if self.mode == Mode::Insert {
+                    let idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
+                    self.rope.insert(idx, &self.last_insertion);
+                    self.update_cursor_from_char_idx(idx + self.last_insertion.len());
+                    self.ensure_valid_normal_pos();
+                }
+                self.change_mode(Mode::Normal);
                 return;
             }
             _ => {}
@@ -734,9 +752,7 @@ impl App {
                 return;
             }
             Some(Action::Delete) | Some(Action::Change) => {
-                // save command
-                self.last_command = command.clone();
-
+                should_save_command = true;
                 if visual_mode {
                     let start_select_rng = self.selection.ancor.min(self.selection.cursor);
                     let end_select_rng = self.selection.ancor.max(self.selection.cursor);
@@ -759,38 +775,54 @@ impl App {
             _ => {}
         }
 
-        self.update_cursor_from_char_idx(cursor_target_idx);
-        self.ensure_valid_normal_pos();
-        self.selection.cursor = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
-        self.scroll();
+        if self.mode == Mode::Insert && !repeat {
+            self.last_insertion.clear();
+        }
+
+        if should_save_command {
+            self.last_command = command.clone();
+        }
+
+        if should_move_cursor {
+            self.update_cursor_from_char_idx(cursor_target_idx);
+            self.ensure_valid_normal_pos();
+            self.selection.cursor = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
+        }
 
         if should_update_preferred_x {
             self.cursor_pos.preferred_x = self.cursor_pos.x;
         }
+
+        self.scroll();
     }
 
     fn insert_text(&mut self, e: KeyEvent) {
+        let mut text_to_insert = None;
+        let mut idx = 0;
         match e.code {
             KeyCode::Char(c) => {
                 let i = self.rope.line_to_char(self.cursor_pos.y);
                 let x = self.cursor_pos.x;
-                self.rope.insert_char(i + x, c);
+                idx = i + x;
+                text_to_insert = Some(String::from(c));
                 self.cursor_pos.x += 1;
             }
             KeyCode::Tab => {
                 let i = self.rope.line_to_char(self.cursor_pos.y);
                 let x = self.cursor_pos.x;
-                self.rope.insert(i + x, "    ");
+                idx = i + x;
+                text_to_insert = Some(String::from("    "));
                 self.cursor_pos.x += 4;
             }
             KeyCode::Backspace => {
                 let x = self.cursor_pos.x;
                 let y = self.cursor_pos.y;
+                self.last_insertion.pop();
 
                 if x > 0 {
                     // NORMAL BACKSPACE: Just delete the char to the left
-                    let char_idx = self.rope.line_to_char(y) + x;
-                    self.rope.remove(char_idx - 1..char_idx);
+                    idx = self.rope.line_to_char(y) + x;
+                    self.rope.remove(idx - 1..idx);
                     self.cursor_pos.x -= 1;
                 } else if y > 0 {
                     // LINE MERGE: Backspacing at the start of a line
@@ -801,10 +833,10 @@ impl App {
 
                     // 2. Find the index of the newline character
                     // In Ropey, the newline is usually the last char of the line
-                    let char_idx = self.rope.line_to_char(y);
+                    let idx = self.rope.line_to_char(y);
 
                     // 3. Remove the newline character
-                    self.rope.remove(char_idx - 1..char_idx);
+                    self.rope.remove(idx - 1..idx);
 
                     // 4. Move cursor up to the end of the previous line
                     self.cursor_pos.y -= 1;
@@ -817,11 +849,16 @@ impl App {
             KeyCode::Enter => {
                 let i = self.rope.line_to_char(self.cursor_pos.y);
                 let x = self.cursor_pos.x;
-                self.rope.insert_char(i + x, '\n');
+                idx = i + x;
+                text_to_insert = Some(String::from('\n'));
                 self.cursor_pos.y += 1;
                 self.cursor_pos.x = 0;
             }
             _ => {}
+        }
+        if let Some(text) = text_to_insert {
+            self.rope.insert(idx, &text);
+            self.last_insertion += &text;
         }
         self.scroll();
     }
