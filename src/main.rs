@@ -664,6 +664,16 @@ impl App {
                 );
                 yank_lines = true;
             }
+            Some(Motion::UpperChange) => {
+                let rope_line = self.rope.line(self.cursor_pos.y);
+                if is_empty_line(&rope_line) {
+                    self.change_mode(Mode::Insert);
+                    return;
+                }
+                cursor_target_idx = line_end_idx(char_idx, &self.rope);
+                range = (char_idx, cursor_target_idx);
+                should_move_cursor = false;
+            }
             Some(Motion::Paste) => {
                 should_save_command = true;
                 if let Some(buf) = self.yank_buffer.get(&'"') {

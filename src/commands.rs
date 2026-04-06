@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::trie::*;
 
-// motions are not dependant on actions
+// motions are not dependant on actions and should execute immediately
 #[derive(Debug, Clone, Copy)]
 pub enum Motion {
     Up,
@@ -31,6 +31,8 @@ pub enum Motion {
     UpperInsert,
     Append,
     UpperAppend,
+    UpperChange,
+    UpperDelete,
     EnterCommandMode,
     EnterSearchMode,
     DeleteLine,
@@ -213,10 +215,28 @@ impl Parser {
                     }
                     None => {
                         // create new command
-                        return Some(Command {
-                            motion: Some(motion),
-                            ..Default::default()
-                        });
+                        match motion {
+                            Motion::UpperChange => {
+                                return Some(Command {
+                                    motion: Some(motion),
+                                    action: Some(Action::Change),
+                                    ..Default::default()
+                                });
+                            }
+                            Motion::UpperDelete => {
+                                return Some(Command {
+                                    motion: Some(Motion::LineEnd),
+                                    action: Some(Action::Delete),
+                                    ..Default::default()
+                                });
+                            }
+                            _ => {
+                                return Some(Command {
+                                    motion: Some(motion),
+                                    ..Default::default()
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -372,6 +392,14 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('.'), KeyModifiers::empty())],
         Motion::Repeat,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('C'), KeyModifiers::empty())],
+        Motion::UpperChange,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('D'), KeyModifiers::empty())],
+        Motion::UpperDelete,
     );
 
     trie
