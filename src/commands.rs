@@ -37,6 +37,7 @@ pub enum Motion {
     EnterSearchMode,
     DeleteLine,
     ChangeLine,
+    DeleteChar,
     YankLine,
     UpperYank,
     Paste,
@@ -198,55 +199,47 @@ impl Parser {
         self.motion_buffer.push(key_event);
         if let Some(node) = self.trie.search(&self.motion_buffer) {
             if let Some(motion) = node.command {
-                match &mut self.command {
-                    Some(cmd) => {
-                        // reroute cw to ce
-                        match (cmd.action, motion) {
-                            (Some(Action::Change), Motion::Word) => {
-                                cmd.motion = Some(Motion::End);
-                            }
-                            (Some(Action::Change), Motion::UpperWord) => {
-                                cmd.motion = Some(Motion::UpperEnd);
-                            }
-                            _ => {
-                                cmd.motion = Some(motion);
-                            }
+                let mut new_cmd = Command::default();
+                if let Some(cmd) = &self.command {
+                    new_cmd.count = cmd.count.clone();
+                    match (cmd.action, motion) {
+                        (Some(Action::Change), Motion::Word) => {
+                            new_cmd.motion = Some(Motion::End);
+                            new_cmd.action = Some(Action::Change);
+                            return Some(new_cmd);
                         }
-                        return Some(cmd.clone());
-                    }
-                    None => {
-                        // create new command
-                        match motion {
-                            Motion::UpperChange => {
-                                return Some(Command {
-                                    motion: Some(motion),
-                                    action: Some(Action::Change),
-                                    ..Default::default()
-                                });
-                            }
-                            Motion::UpperDelete => {
-                                return Some(Command {
-                                    motion: Some(Motion::LineEnd),
-                                    action: Some(Action::Delete),
-                                    ..Default::default()
-                                });
-                            }
-                            Motion::UpperYank => {
-                                return Some(Command {
-                                    motion: Some(Motion::LineEnd),
-                                    action: Some(Action::Yank),
-                                    ..Default::default()
-                                });
-                            }
-                            _ => {
-                                return Some(Command {
-                                    motion: Some(motion),
-                                    ..Default::default()
-                                });
-                            }
+                        (Some(Action::Change), Motion::UpperWord) => {
+                            new_cmd.motion = Some(Motion::UpperEnd);
+                            new_cmd.action = Some(Action::Change);
+                            return Some(new_cmd);
+                        }
+                        _ => {
+                            new_cmd.action = cmd.action;
                         }
                     }
                 }
+                match motion {
+                    Motion::UpperChange => {
+                        new_cmd.motion = Some(motion);
+                        new_cmd.action = Some(Action::Change);
+                    }
+                    Motion::UpperDelete => {
+                        new_cmd.motion = Some(Motion::LineEnd);
+                        new_cmd.action = Some(Action::Delete);
+                    }
+                    Motion::UpperYank => {
+                        new_cmd.motion = Some(Motion::LineEnd);
+                        new_cmd.action = Some(Action::Yank);
+                    }
+                    Motion::DeleteChar => {
+                        new_cmd.motion = Some(Motion::Right);
+                        new_cmd.action = Some(Action::Delete);
+                    }
+                    _ => {
+                        new_cmd.motion = Some(motion);
+                    }
+                }
+                return Some(new_cmd);
             }
             // return none here so that the buffer doesn't reset
             // because we found a node but not yet a command
@@ -412,6 +405,10 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::empty())],
         Motion::UpperYank,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty())],
+        Motion::DeleteChar,
     );
 
     trie
