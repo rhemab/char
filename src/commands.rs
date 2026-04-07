@@ -38,6 +38,7 @@ pub enum Motion {
     DeleteLine,
     ChangeLine,
     YankLine,
+    UpperYank,
     Paste,
     UpperPaste,
     NextSearchResult,
@@ -230,6 +231,13 @@ impl Parser {
                                     ..Default::default()
                                 });
                             }
+                            Motion::UpperYank => {
+                                return Some(Command {
+                                    motion: Some(Motion::LineEnd),
+                                    action: Some(Action::Yank),
+                                    ..Default::default()
+                                });
+                            }
                             _ => {
                                 return Some(Command {
                                     motion: Some(motion),
@@ -400,6 +408,10 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('D'), KeyModifiers::empty())],
         Motion::UpperDelete,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::empty())],
+        Motion::UpperYank,
     );
 
     trie

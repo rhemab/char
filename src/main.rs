@@ -736,7 +736,7 @@ impl App {
         match command.action {
             Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
                 // yank slice to buffer
-                if let Some(slice) = self.rope.get_slice(range.0..range.1) {
+                if let Some(slice) = self.rope.get_slice(range.0..=range.1) {
                     let new_content = if yank_lines {
                         YankBuffer::Lines(String::from(slice))
                     } else {
