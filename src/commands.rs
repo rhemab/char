@@ -54,10 +54,17 @@ pub enum Action {
     Yank,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Modifier {
+    Inside,
+    Around,
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct Command {
     pub motion: Option<Motion>,
     pub action: Option<Action>,
+    pub modifier: Option<Modifier>,
     pub count: String,
 }
 
@@ -192,6 +199,23 @@ impl Parser {
                 }
                 return None;
             }
+            (KeyCode::Char('i'), KeyModifiers::NONE) => {
+                if let Some(cmd) = &mut self.command {
+                    if cmd.action.is_some() {
+                        cmd.modifier = Some(Modifier::Inside);
+                        eprintln!("inside");
+                        return None;
+                    }
+                }
+            }
+            (KeyCode::Char('a'), KeyModifiers::NONE) => {
+                if let Some(cmd) = &mut self.command {
+                    if cmd.action.is_some() {
+                        cmd.modifier = Some(Modifier::Around);
+                        return None;
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -202,19 +226,20 @@ impl Parser {
                 let mut new_cmd = Command::default();
                 if let Some(cmd) = &self.command {
                     new_cmd.count = cmd.count.clone();
-                    match (cmd.action, motion) {
-                        (Some(Action::Change), Motion::Word) => {
+                    match (cmd.action, cmd.modifier, motion) {
+                        (Some(Action::Change), None, Motion::Word) => {
                             new_cmd.motion = Some(Motion::End);
                             new_cmd.action = Some(Action::Change);
                             return Some(new_cmd);
                         }
-                        (Some(Action::Change), Motion::UpperWord) => {
+                        (Some(Action::Change), None, Motion::UpperWord) => {
                             new_cmd.motion = Some(Motion::UpperEnd);
                             new_cmd.action = Some(Action::Change);
                             return Some(new_cmd);
                         }
                         _ => {
                             new_cmd.action = cmd.action;
+                            new_cmd.modifier = cmd.modifier;
                         }
                     }
                 }
