@@ -1,6 +1,6 @@
 # char _
 
-An opinionated modal text editor with Vim motions, pleasant defaults and zero configuration required.
+A vim-like text editor with pleasant defaults and zero required configuration.
 
 char aims to be fast, versatile and reliable.
 
