@@ -576,6 +576,16 @@ impl App {
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
             }
+            (Some(Motion::UpperWord), Some(commands::Modifier::Inside)) => {
+                let rope_line = self.rope.line(self.cursor_pos.y);
+                if is_empty_line(&rope_line) {
+                    self.last_command = command.clone();
+                    return;
+                }
+                range = inside_upper_word(char_idx, &self.rope);
+                cursor_target_idx = range.0;
+                should_update_preferred_x = true;
+            }
             (Some(Motion::UpperWord), _) => {
                 for _ in 0..count {
                     range = (char_idx, upper_word_idx(range.1, &self.rope));
@@ -1179,6 +1189,35 @@ fn inside_word(char_idx: usize, rope: &Rope) -> (usize, usize) {
         }
         let is_alnum = c.is_alphanumeric() || c == '_';
         if is_alnum != starting_is_alnum {
+            break;
+        }
+    }
+
+    (start_idx, end_idx)
+}
+
+fn inside_upper_word(char_idx: usize, rope: &Rope) -> (usize, usize) {
+    let mut start_idx = char_idx;
+    let mut end_idx = char_idx;
+    let starting_is_alnum = {
+        let c = rope.char(char_idx);
+        c.is_alphanumeric() || c == '_'
+    };
+
+    // get start idx
+    while start_idx > 0 {
+        let prev = rope.char(start_idx - 1);
+        if prev.is_whitespace() || prev == '\n' {
+            break;
+        }
+        start_idx -= 1;
+    }
+
+    // get end idx
+    while end_idx < rope.len_chars() - 1 {
+        end_idx += 1;
+        let c = rope.char(end_idx);
+        if c.is_whitespace() || c == '\n' {
             break;
         }
     }
