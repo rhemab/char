@@ -418,6 +418,7 @@ impl App {
 
         eprintln!("Command: {:?}", command);
 
+        let action = command.action.is_some();
         let mut yank_lines = false;
         let mut should_update_preferred_x = false;
         let mut should_move_cursor = true;
@@ -571,8 +572,9 @@ impl App {
                 should_update_preferred_x = true;
             }
             (Some(Motion::Word), None) => {
+                // delete, change, and yank should stop at \n
                 for _ in 0..count {
-                    range = (char_idx, next_word_idx(range.1, &self.rope));
+                    range = (char_idx, next_word_idx(range.1, &self.rope, action));
                 }
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
@@ -590,7 +592,7 @@ impl App {
             }
             (Some(Motion::UpperWord), _) => {
                 for _ in 0..count {
-                    range = (char_idx, upper_word_idx(range.1, &self.rope));
+                    range = (char_idx, upper_word_idx(range.1, &self.rope, action));
                 }
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
@@ -1109,7 +1111,7 @@ fn prev_empty_line_idx(idx: usize, rope: &Rope) -> usize {
     rope.line_to_char(y)
 }
 
-fn next_word_idx(mut idx: usize, rope: &Rope) -> usize {
+fn next_word_idx(mut idx: usize, rope: &Rope, action: bool) -> usize {
     let len = rope.len_chars();
     if idx >= len {
         return idx;
@@ -1132,6 +1134,10 @@ fn next_word_idx(mut idx: usize, rope: &Rope) -> usize {
         idx += 1;
     }
 
+    if action && rope.char(idx) == '\n' {
+        return idx;
+    }
+
     // 2. Skip whitespace but stop on empty lines
     while idx < len && rope.char(idx).is_whitespace() {
         if rope.char(idx) == '\n' && idx + 1 < len && rope.char(idx + 1) == '\n' {
@@ -1143,7 +1149,7 @@ fn next_word_idx(mut idx: usize, rope: &Rope) -> usize {
     idx
 }
 
-fn upper_word_idx(mut idx: usize, rope: &Rope) -> usize {
+fn upper_word_idx(mut idx: usize, rope: &Rope, action: bool) -> usize {
     let len = rope.len_chars();
     if idx >= len {
         return idx;
@@ -1152,6 +1158,10 @@ fn upper_word_idx(mut idx: usize, rope: &Rope) -> usize {
     // 1. Skip non-whitespace
     while idx < len && !rope.char(idx).is_whitespace() {
         idx += 1;
+    }
+
+    if action && rope.char(idx) == '\n' {
+        return idx;
     }
 
     // 2. Skip whitespace but stop on empty lines
@@ -1168,6 +1178,10 @@ fn upper_word_idx(mut idx: usize, rope: &Rope) -> usize {
 fn inside_word(char_idx: usize, rope: &Rope) -> (usize, usize) {
     let mut start_idx = char_idx;
     let mut end_idx = char_idx;
+    if rope.char(char_idx).is_whitespace() {
+        end_idx += 1;
+        return (start_idx, end_idx);
+    }
     let starting_is_alnum = {
         let c = rope.char(char_idx);
         c.is_alphanumeric() || c == '_'
@@ -1205,10 +1219,10 @@ fn inside_word(char_idx: usize, rope: &Rope) -> (usize, usize) {
 fn inside_upper_word(char_idx: usize, rope: &Rope) -> (usize, usize) {
     let mut start_idx = char_idx;
     let mut end_idx = char_idx;
-    let starting_is_alnum = {
-        let c = rope.char(char_idx);
-        c.is_alphanumeric() || c == '_'
-    };
+    if rope.char(char_idx).is_whitespace() {
+        end_idx += 1;
+        return (start_idx, end_idx);
+    }
 
     // get start idx
     while start_idx > 0 {
