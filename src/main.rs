@@ -1454,7 +1454,8 @@ fn new_line_above_idx(cursor_pos: &CursorPos, rope: &Rope) -> (usize, String) {
 
 fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     // search to the end of the line
-    let mut line_idx = rope.char_to_line(char_idx);
+    let start_line_idx = rope.char_to_line(char_idx);
+    let mut line_idx = start_line_idx;
     let current_line = rope.line(line_idx);
     let start = char_idx + 1;
     let end = char_idx + current_line.len_chars();
@@ -1473,12 +1474,23 @@ fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
         line_idx += 1;
     }
 
+    // search from the top to the cursor
+    line_idx = 0;
+    while line_idx <= start_line_idx {
+        let text = rope.line(line_idx).to_string();
+        if let Some(idx) = text.find(query) {
+            return rope.line_to_char(line_idx) + idx;
+        }
+        line_idx += 1;
+    }
+
     char_idx
 }
 
 fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     // search from the start of the line
-    let mut line_idx = rope.char_to_line(char_idx);
+    let start_line_idx = rope.char_to_line(char_idx);
+    let mut line_idx = start_line_idx;
     let start = rope.line_to_char(line_idx);
     let end = char_idx;
     if let Some(idx) = rope.slice(start..end).to_string().rfind(query) {
@@ -1487,6 +1499,16 @@ fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
 
     // search line by line
     while line_idx > 0 {
+        line_idx = line_idx.saturating_sub(1);
+        let text = rope.line(line_idx).to_string();
+        if let Some(idx) = text.rfind(query) {
+            return rope.line_to_char(line_idx) + idx;
+        }
+    }
+
+    // search from the bottom to the cursor
+    line_idx = rope.len_lines();
+    while line_idx >= start_line_idx {
         line_idx = line_idx.saturating_sub(1);
         let text = rope.line(line_idx).to_string();
         if let Some(idx) = text.rfind(query) {
