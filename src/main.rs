@@ -566,6 +566,7 @@ impl App {
                     return;
                 }
                 range = inside_word(char_idx, &self.rope);
+                eprintln!("range: {:?}", range);
                 cursor_target_idx = range.0;
                 should_update_preferred_x = true;
             }
@@ -583,6 +584,7 @@ impl App {
                     return;
                 }
                 range = inside_upper_word(char_idx, &self.rope);
+                eprintln!("range: {:?}", range);
                 cursor_target_idx = range.0;
                 should_update_preferred_x = true;
             }
@@ -699,8 +701,12 @@ impl App {
                 if let Some(buf) = self.yank_buffer.get(&'"') {
                     match buf {
                         YankBuffer::Chars(content) => {
-                            // insert after cursor
-                            self.rope.insert(char_idx + 1, &content);
+                            let mut insert_idx = char_idx;
+                            // if on empty line, insert before cursor
+                            if self.rope.char(char_idx) != '\n' {
+                                insert_idx += 1;
+                            }
+                            self.rope.insert(insert_idx, &content);
                             cursor_target_idx = char_idx + content.len();
                         }
                         YankBuffer::Lines(content) => {
@@ -756,7 +762,7 @@ impl App {
         match command.action {
             Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
                 // yank slice to buffer
-                if let Some(slice) = self.rope.get_slice(range.0..=range.1) {
+                if let Some(slice) = self.rope.get_slice(range.0..range.1) {
                     let new_content = if yank_lines {
                         YankBuffer::Lines(String::from(slice))
                     } else {
@@ -1181,7 +1187,7 @@ fn inside_word(char_idx: usize, rope: &Rope) -> (usize, usize) {
     }
 
     // get end idx
-    while end_idx < rope.len_chars() - 1 {
+    while end_idx + 1 < rope.len_chars() - 1 {
         end_idx += 1;
         let c = rope.char(end_idx);
         if c.is_whitespace() || c == '\n' {
@@ -1214,7 +1220,7 @@ fn inside_upper_word(char_idx: usize, rope: &Rope) -> (usize, usize) {
     }
 
     // get end idx
-    while end_idx < rope.len_chars() - 1 {
+    while end_idx + 1 < rope.len_chars() - 1 {
         end_idx += 1;
         let c = rope.char(end_idx);
         if c.is_whitespace() || c == '\n' {
