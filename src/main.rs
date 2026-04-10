@@ -923,8 +923,7 @@ impl App {
 
     fn return_to_normal_mode(&mut self) {
         self.change_mode(Mode::Normal);
-        self.parser.input_buffer.clear();
-        self.parser.motion_buffer.clear();
+        self.parser.reset();
         self.ensure_valid_normal_pos();
         self.cursor_pos.preferred_x = self.cursor_pos.x;
     }
