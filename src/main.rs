@@ -561,7 +561,7 @@ impl App {
                 cursor_target_idx = range.0;
             }
             (Some(Motion::OpenParens), Some(commands::Modifier::Inside)) => {
-                if let Some(r) = inside_parens(char_idx, &self.rope) {
+                if let Some(r) = inside_delimiter(char_idx, &self.rope, '(', ')') {
                     range = r;
                     cursor_target_idx = range.0;
                     should_update_preferred_x = true;
@@ -1525,24 +1525,37 @@ fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     char_idx
 }
 
-fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
+fn inside_delimiter(
+    char_idx: usize,
+    rope: &Rope,
+    opening: char,
+    closing: char,
+) -> Option<(usize, usize)> {
+    let mut line_limit = 100;
+    match opening {
+        '{' => {
+            line_limit = 500;
+        }
+        _ => {}
+    }
     let mut start = char_idx;
     let mut end = char_idx;
     let mut idx = char_idx;
-    let mut consecutive_new_line = false;
 
     if char_idx >= rope.len_chars() {
         return None;
     }
 
     // cursor is on '('
-    if rope.char(char_idx) == '(' {
+    if rope.char(char_idx) == opening {
         let mut count = 0;
+        let mut line_count = 0;
         start = char_idx + 1;
         // search forward for end
         idx += 1;
-        while idx < rope.len_chars() {
-            if rope.char(idx) == ')' {
+        while idx < rope.len_chars() && line_count < line_limit {
+            let c = rope.char(idx);
+            if c == closing {
                 if count == 0 {
                     end = idx;
                     return Some((start, end));
@@ -1551,18 +1564,12 @@ fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
                 }
             }
 
-            if rope.char(idx) == '(' {
+            if c == opening {
                 count += 1;
             }
 
-            // stop search at empty line
-            if rope.char(idx) == '\n' {
-                if consecutive_new_line {
-                    return None;
-                }
-                consecutive_new_line = true;
-            } else {
-                consecutive_new_line = false;
+            if c == '\n' {
+                line_count += 1;
             }
 
             idx += 1;
@@ -1572,13 +1579,15 @@ fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
     }
 
     // cursor is on ')'
-    if rope.char(char_idx) == ')' {
+    if rope.char(char_idx) == closing {
         let mut count = 0;
+        let mut line_count = 0;
         end = char_idx;
         // search backwards for '('
-        while idx > 0 {
+        while idx > 0 && line_count < line_limit {
             idx -= 1;
-            if rope.char(idx) == '(' {
+            let c = rope.char(idx);
+            if c == opening {
                 if count == 0 {
                     start = idx + 1;
                     return Some((start, end));
@@ -1587,18 +1596,12 @@ fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
                 }
             }
 
-            if rope.char(idx) == ')' {
+            if c == closing {
                 count += 1;
             }
 
-            // stop search at empty line
-            if rope.char(idx) == '\n' {
-                if consecutive_new_line {
-                    return None;
-                }
-                consecutive_new_line = true;
-            } else {
-                consecutive_new_line = false;
+            if c == '\n' {
+                line_count += 1;
             }
         }
 
@@ -1611,9 +1614,11 @@ fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
 
     // search backwards for '('
     let mut count = 0;
-    while idx > 0 {
+    let mut line_count = 0;
+    while idx > 0 && line_count < line_limit {
         idx -= 1;
-        if rope.char(idx) == '(' {
+        let c = rope.char(idx);
+        if c == opening {
             if count == 0 {
                 start = idx + 1;
                 found_start = true;
@@ -1622,18 +1627,13 @@ fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
                 count -= 1;
             }
         }
-        if rope.char(idx) == ')' {
+
+        if c == closing {
             count += 1;
         }
 
-        // stop search at empty line
-        if rope.char(idx) == '\n' {
-            if consecutive_new_line {
-                break;
-            }
-            consecutive_new_line = true;
-        } else {
-            consecutive_new_line = false;
+        if c == '\n' {
+            line_count += 1;
         }
     }
 
@@ -1641,9 +1641,11 @@ fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
     if found_start {
         // search forwards for ')' from cursor
         let mut count = 0;
+        let mut line_count = 0;
         idx += 1;
-        while idx < rope.len_chars() {
-            if rope.char(idx) == ')' {
+        while idx < rope.len_chars() && line_count < line_limit {
+            let c = rope.char(idx);
+            if c == closing {
                 if count == 0 {
                     end = idx;
                     found_end = true;
@@ -1652,18 +1654,12 @@ fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
                     count -= 1;
                 }
             }
-            if rope.char(idx) == '(' {
+            if c == opening {
                 count += 1;
             }
 
-            // stop search at empty line
-            if rope.char(idx) == '\n' {
-                if consecutive_new_line {
-                    break;
-                }
-                consecutive_new_line = true;
-            } else {
-                consecutive_new_line = false;
+            if c == '\n' {
+                line_count += 1;
             }
 
             idx += 1;
@@ -1681,15 +1677,29 @@ fn inside_parens(char_idx: usize, rope: &Rope) -> Option<(usize, usize)> {
     // search forwards for matching '(' and ')'
     idx = char_idx;
     idx += 1;
-    while idx < rope.len_chars() {
-        if !found_start && rope.char(idx) == '(' {
+    let mut count = 0;
+    let mut line_count = 0;
+    while idx < rope.len_chars() && line_count < line_limit {
+        let c = rope.char(idx);
+        if found_start {
+            if c == opening {
+                count += 1;
+            } else if c == closing {
+                if count == 0 {
+                    end = idx;
+                    found_end = true;
+                    return Some((start, end));
+                } else {
+                    count -= 1;
+                }
+            }
+        } else if !found_start && c == opening {
             start = idx + 1;
             found_start = true;
         }
-        if found_start && rope.char(idx) == ')' {
-            end = idx;
-            found_end = true;
-            return Some((start, end));
+
+        if c == '\n' {
+            line_count += 1;
         }
 
         idx += 1;
