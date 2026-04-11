@@ -560,36 +560,64 @@ impl App {
                 }
                 cursor_target_idx = range.0;
             }
-            (Some(Motion::OpenAngleBracket), Some(commands::Modifier::Inside)) => {
+            (Some(Motion::OpenAngleBracket), Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '<', '>') {
-                    range = r;
+                    match modifier {
+                        commands::Modifier::Around => {
+                            range = (r.0 - 1, r.1 + 1);
+                        }
+                        _ => {
+                            range = r;
+                        }
+                    }
                     cursor_target_idx = range.0;
                     should_update_preferred_x = true;
                 } else {
                     return;
                 }
             }
-            (Some(Motion::OpenCurlyBrace), Some(commands::Modifier::Inside)) => {
+            (Some(Motion::OpenCurlyBrace), Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '{', '}') {
-                    range = r;
+                    match modifier {
+                        commands::Modifier::Around => {
+                            range = (r.0 - 1, r.1 + 1);
+                        }
+                        _ => {
+                            range = r;
+                        }
+                    }
                     cursor_target_idx = range.0;
                     should_update_preferred_x = true;
                 } else {
                     return;
                 }
             }
-            (Some(Motion::OpenBracket), Some(commands::Modifier::Inside)) => {
+            (Some(Motion::OpenBracket), Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '[', ']') {
-                    range = r;
+                    match modifier {
+                        commands::Modifier::Around => {
+                            range = (r.0 - 1, r.1 + 1);
+                        }
+                        _ => {
+                            range = r;
+                        }
+                    }
                     cursor_target_idx = range.0;
                     should_update_preferred_x = true;
                 } else {
                     return;
                 }
             }
-            (Some(Motion::OpenParen), Some(commands::Modifier::Inside)) => {
+            (Some(Motion::OpenParen), Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '(', ')') {
-                    range = r;
+                    match modifier {
+                        commands::Modifier::Around => {
+                            range = (r.0 - 1, r.1 + 1);
+                        }
+                        _ => {
+                            range = r;
+                        }
+                    }
                     cursor_target_idx = range.0;
                     should_update_preferred_x = true;
                 } else {
@@ -1714,7 +1742,6 @@ fn inside_delimiter(
             } else if c == closing {
                 if count == 0 {
                     end = idx;
-                    found_end = true;
                     return Some((start, end));
                 } else {
                     count -= 1;
