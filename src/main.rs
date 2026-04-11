@@ -560,7 +560,34 @@ impl App {
                 }
                 cursor_target_idx = range.0;
             }
-            (Some(Motion::OpenParens), Some(commands::Modifier::Inside)) => {
+            (Some(Motion::OpenAngleBracket), Some(commands::Modifier::Inside)) => {
+                if let Some(r) = inside_delimiter(char_idx, &self.rope, '<', '>') {
+                    range = r;
+                    cursor_target_idx = range.0;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
+            }
+            (Some(Motion::OpenCurlyBrace), Some(commands::Modifier::Inside)) => {
+                if let Some(r) = inside_delimiter(char_idx, &self.rope, '{', '}') {
+                    range = r;
+                    cursor_target_idx = range.0;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
+            }
+            (Some(Motion::OpenBracket), Some(commands::Modifier::Inside)) => {
+                if let Some(r) = inside_delimiter(char_idx, &self.rope, '[', ']') {
+                    range = r;
+                    cursor_target_idx = range.0;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
+            }
+            (Some(Motion::OpenParen), Some(commands::Modifier::Inside)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '(', ')') {
                     range = r;
                     cursor_target_idx = range.0;

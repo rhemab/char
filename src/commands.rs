@@ -45,7 +45,13 @@ pub enum Motion {
     NextSearchResult,
     PrevSearchResult,
     Repeat,
-    OpenParens,
+    OpenParen,
+    OpenCurlyBrace,
+    OpenBracket,
+    OpenAngleBracket,
+    OpenDoubleQuote,
+    OpenSingleQuote,
+    OpenBacktick,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -262,7 +268,14 @@ impl Parser {
                     }
                     Motion::Back => {
                         if new_cmd.action.is_some() && new_cmd.modifier.is_some() {
-                            new_cmd.motion = Some(Motion::OpenParens);
+                            new_cmd.motion = Some(Motion::OpenParen);
+                        } else {
+                            new_cmd.motion = Some(motion);
+                        }
+                    }
+                    Motion::PrevEmptyLine => {
+                        if new_cmd.action.is_some() && new_cmd.modifier.is_some() {
+                            new_cmd.motion = Some(Motion::OpenCurlyBrace);
                         } else {
                             new_cmd.motion = Some(motion);
                         }
@@ -444,7 +457,27 @@ fn generate_trie() -> TrieNode {
     );
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('('), KeyModifiers::empty())],
-        Motion::OpenParens,
+        Motion::OpenParen,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('['), KeyModifiers::empty())],
+        Motion::OpenBracket,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('<'), KeyModifiers::empty())],
+        Motion::OpenAngleBracket,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('\''), KeyModifiers::empty())],
+        Motion::OpenSingleQuote,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('"'), KeyModifiers::empty())],
+        Motion::OpenDoubleQuote,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('`'), KeyModifiers::empty())],
+        Motion::OpenBacktick,
     );
 
     trie
