@@ -45,6 +45,7 @@ pub enum Motion {
     NextSearchResult,
     PrevSearchResult,
     Repeat,
+    OpenParens,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -203,7 +204,6 @@ impl Parser {
                 if let Some(cmd) = &mut self.command {
                     if cmd.action.is_some() {
                         cmd.modifier = Some(Modifier::Inside);
-                        eprintln!("inside");
                         return None;
                     }
                 }
@@ -259,6 +259,13 @@ impl Parser {
                     Motion::DeleteChar => {
                         new_cmd.motion = Some(Motion::Right);
                         new_cmd.action = Some(Action::Delete);
+                    }
+                    Motion::Back => {
+                        if new_cmd.action.is_some() && new_cmd.modifier.is_some() {
+                            new_cmd.motion = Some(Motion::OpenParens);
+                        } else {
+                            new_cmd.motion = Some(motion);
+                        }
                     }
                     _ => {
                         new_cmd.motion = Some(motion);
@@ -434,6 +441,10 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty())],
         Motion::DeleteChar,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('('), KeyModifiers::empty())],
+        Motion::OpenParens,
     );
 
     trie
