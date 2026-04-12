@@ -52,6 +52,7 @@ pub enum Motion {
     DoubleQuote,
     SingleQuote,
     Backtick,
+    Percent,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -478,6 +479,10 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('`'), KeyModifiers::empty())],
         Motion::Backtick,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('%'), KeyModifiers::empty())],
+        Motion::Percent,
     );
 
     trie

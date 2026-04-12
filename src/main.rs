@@ -560,6 +560,15 @@ impl App {
                 }
                 cursor_target_idx = range.0;
             }
+            (Some(Motion::Percent), _) => {
+                if let Some(i) = matching_delimiter_idx(char_idx, &self.rope) {
+                    range.1 = i;
+                    cursor_target_idx = range.1;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
+            }
             (Some(Motion::Backtick), Some(modifier)) => {
                 if let Some(r) =
                     inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '`')
@@ -1848,6 +1857,90 @@ fn inside_quotes(x: usize, y: usize, rope: &Rope, quote: char) -> Option<(usize,
     for (start, end) in ranges {
         if x <= start {
             return Some((line_char_idx + start + 1, line_char_idx + end));
+        }
+    }
+
+    None
+}
+
+fn matching_delimiter_idx(char_idx: usize, rope: &Rope) -> Option<usize> {
+    let c = rope.char(char_idx);
+    let tokens = ['[', ']', '(', ')', '{', '}', '<', '>'];
+
+    // if cursor is on opening goto closing
+    if tokens.contains(&c) {
+        return find_matching_delimiter(char_idx, rope, c);
+    }
+
+    // if cursor is on closing goto opening
+
+    // find delimiter inline
+    // if outside, go to closing
+    // if inside, go to opening
+    // else, return
+
+    None
+}
+
+fn find_matching_delimiter(char_idx: usize, rope: &Rope, token: char) -> Option<usize> {
+    let mut idx = char_idx;
+    let opening;
+    let closing;
+    match token {
+        '[' | ']' => {
+            opening = '[';
+            closing = ']';
+        }
+        '(' | ')' => {
+            opening = '(';
+            closing = ')';
+        }
+        '{' | '}' => {
+            opening = '{';
+            closing = '}';
+        }
+        '<' | '>' => {
+            opening = '<';
+            closing = '>';
+        }
+        _ => {
+            return None;
+        }
+    }
+
+    if token == opening {
+        // search forwards
+        let mut count = 0;
+        idx += 1;
+        while idx < rope.len_chars() - 1 {
+            let c = rope.char(idx);
+            if c == opening {
+                count += 1;
+            } else if c == closing {
+                if count == 0 {
+                    return Some(idx);
+                } else {
+                    count -= 1;
+                }
+            }
+
+            idx += 1;
+        }
+    } else if token == closing {
+        // search backwards
+        let mut count = 0;
+        while idx > 0 {
+            idx -= 1;
+            let c = rope.char(idx);
+            if c == closing {
+                count += 1;
+            } else if c == opening {
+                if count == 0 {
+                    return Some(idx);
+                } else {
+                    count -= 1;
+                }
+            }
         }
     }
 
