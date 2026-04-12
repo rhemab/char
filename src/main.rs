@@ -560,6 +560,60 @@ impl App {
                 }
                 cursor_target_idx = range.0;
             }
+            (Some(Motion::Backtick), Some(modifier)) => {
+                if let Some(r) =
+                    inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '`')
+                {
+                    match modifier {
+                        commands::Modifier::Around => {
+                            range = (r.0 - 1, r.1 + 1);
+                        }
+                        _ => {
+                            range = r;
+                        }
+                    }
+                    cursor_target_idx = range.0;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
+            }
+            (Some(Motion::SingleQuote), Some(modifier)) => {
+                if let Some(r) =
+                    inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '\'')
+                {
+                    match modifier {
+                        commands::Modifier::Around => {
+                            range = (r.0 - 1, r.1 + 1);
+                        }
+                        _ => {
+                            range = r;
+                        }
+                    }
+                    cursor_target_idx = range.0;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
+            }
+            (Some(Motion::DoubleQuote), Some(modifier)) => {
+                if let Some(r) =
+                    inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '"')
+                {
+                    match modifier {
+                        commands::Modifier::Around => {
+                            range = (r.0 - 1, r.1 + 1);
+                        }
+                        _ => {
+                            range = r;
+                        }
+                    }
+                    cursor_target_idx = range.0;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
+            }
             (Some(Motion::OpenAngleBracket), Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '<', '>') {
                     match modifier {
@@ -1757,6 +1811,44 @@ fn inside_delimiter(
         }
 
         idx += 1;
+    }
+
+    None
+}
+
+fn inside_quotes(x: usize, y: usize, rope: &Rope, quote: char) -> Option<(usize, usize)> {
+    let line_char_idx = rope.line_to_char(y);
+    let line = rope.line(y);
+
+    // get ranges in line
+    let mut ranges = vec![];
+    let mut start = None;
+    let mut end = None;
+    for (i, c) in line.chars().enumerate() {
+        if c == quote {
+            if start.is_none() {
+                start = Some(i);
+            } else if end.is_none() {
+                end = Some(i);
+                ranges.push((start.unwrap(), end.unwrap()));
+                start = None;
+                end = None;
+            }
+        }
+    }
+
+    // check if cursor is in a range
+    for (start, end) in &ranges {
+        if x >= *start && x <= *end {
+            return Some((line_char_idx + start + 1, line_char_idx + end));
+        }
+    }
+
+    // return the next range from the cursor
+    for (start, end) in ranges {
+        if x <= start {
+            return Some((line_char_idx + start + 1, line_char_idx + end));
+        }
     }
 
     None

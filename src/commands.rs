@@ -49,9 +49,9 @@ pub enum Motion {
     OpenCurlyBrace,
     OpenBracket,
     OpenAngleBracket,
-    OpenDoubleQuote,
-    OpenSingleQuote,
-    OpenBacktick,
+    DoubleQuote,
+    SingleQuote,
+    Backtick,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -469,15 +469,15 @@ fn generate_trie() -> TrieNode {
     );
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('\''), KeyModifiers::empty())],
-        Motion::OpenSingleQuote,
+        Motion::SingleQuote,
     );
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('"'), KeyModifiers::empty())],
-        Motion::OpenDoubleQuote,
+        Motion::DoubleQuote,
     );
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('`'), KeyModifiers::empty())],
-        Motion::OpenBacktick,
+        Motion::Backtick,
     );
 
     trie
