@@ -379,11 +379,14 @@ impl App {
                                 self.query = query.to_string();
                                 let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
                                     + self.cursor_pos.preferred_x;
-                                let cursor_target_idx =
-                                    next_search_result_idx(char_idx, query, &self.rope);
-                                self.update_cursor_from_char_idx(cursor_target_idx);
-                                self.cursor_pos.preferred_y = self.cursor_pos.y;
-                                self.cursor_pos.preferred_x = self.cursor_pos.x;
+                                if let Some(idx) =
+                                    next_search_result_idx(char_idx, query, &self.rope)
+                                {
+                                    let cursor_target_idx = idx;
+                                    self.update_cursor_from_char_idx(cursor_target_idx);
+                                    self.cursor_pos.preferred_y = self.cursor_pos.y;
+                                    self.cursor_pos.preferred_x = self.cursor_pos.x;
+                                }
                             }
                         }
                     }
@@ -877,12 +880,20 @@ impl App {
                 }
             }
             (Some(Motion::NextSearchResult), _, _) => {
-                cursor_target_idx = next_search_result_idx(char_idx, &self.query, &self.rope);
-                should_update_preferred_x = true;
+                if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope) {
+                    cursor_target_idx = idx;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
             }
             (Some(Motion::PrevSearchResult), _, _) => {
-                cursor_target_idx = prev_search_result_idx(char_idx, &self.query, &self.rope);
-                should_update_preferred_x = true;
+                if let Some(idx) = prev_search_result_idx(char_idx, &self.query, &self.rope) {
+                    cursor_target_idx = idx;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
             }
             (Some(Motion::Repeat), _, _) => {
                 self.execute_command(self.last_command.clone(), visual_mode, true);
@@ -894,6 +905,17 @@ impl App {
                 }
                 self.change_mode(Mode::Normal);
                 return;
+            }
+            (Some(Motion::Star), _, _) => {
+                let word_range = inside_word(char_idx, &self.rope);
+                let word = self.rope.slice(word_range.0..word_range.1);
+                self.query = word.to_string();
+                if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope) {
+                    cursor_target_idx = idx;
+                    should_update_preferred_x = true;
+                } else {
+                    return;
+                }
             }
             _ => {}
         }
@@ -1600,7 +1622,7 @@ fn new_line_above_idx(cursor_pos: &CursorPos, rope: &Rope) -> (usize, String) {
     (line_start_char, whitespace)
 }
 
-fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
+fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> Option<usize> {
     // search to the end of the line
     let start_line_idx = rope.char_to_line(char_idx);
     let mut line_idx = start_line_idx;
@@ -1608,7 +1630,7 @@ fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     let start = char_idx + 1;
     let end = char_idx + current_line.len_chars();
     if let Some(idx) = rope.slice(start..end).to_string().find(query) {
-        return start + idx;
+        return Some(start + idx);
     }
 
     // search line by line
@@ -1617,7 +1639,7 @@ fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     while line_idx < total_lines {
         let text = rope.line(line_idx).to_string();
         if let Some(idx) = text.find(query) {
-            return rope.line_to_char(line_idx) + idx;
+            return Some(rope.line_to_char(line_idx) + idx);
         }
         line_idx += 1;
     }
@@ -1627,22 +1649,22 @@ fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
     while line_idx <= start_line_idx {
         let text = rope.line(line_idx).to_string();
         if let Some(idx) = text.find(query) {
-            return rope.line_to_char(line_idx) + idx;
+            return Some(rope.line_to_char(line_idx) + idx);
         }
         line_idx += 1;
     }
 
-    char_idx
+    None
 }
 
-fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
+fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> Option<usize> {
     // search from the start of the line
     let start_line_idx = rope.char_to_line(char_idx);
     let mut line_idx = start_line_idx;
     let start = rope.line_to_char(line_idx);
     let end = char_idx;
     if let Some(idx) = rope.slice(start..end).to_string().rfind(query) {
-        return start + idx;
+        return Some(start + idx);
     }
 
     // search line by line
@@ -1650,7 +1672,7 @@ fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
         line_idx = line_idx.saturating_sub(1);
         let text = rope.line(line_idx).to_string();
         if let Some(idx) = text.rfind(query) {
-            return rope.line_to_char(line_idx) + idx;
+            return Some(rope.line_to_char(line_idx) + idx);
         }
     }
 
@@ -1660,11 +1682,11 @@ fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> usize {
         line_idx = line_idx.saturating_sub(1);
         let text = rope.line(line_idx).to_string();
         if let Some(idx) = text.rfind(query) {
-            return rope.line_to_char(line_idx) + idx;
+            return Some(rope.line_to_char(line_idx) + idx);
         }
     }
 
-    char_idx
+    None
 }
 
 fn inside_delimiter(
