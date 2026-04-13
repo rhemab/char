@@ -856,7 +856,7 @@ impl App {
                         }
                         YankBuffer::Lines(content) => {
                             // insert line above
-                            let idx = self.rope.line_to_char(self.cursor_pos.y.saturating_sub(1));
+                            let idx = self.rope.line_to_char(self.cursor_pos.y);
                             self.rope.insert(idx, &content);
                             cursor_target_idx = idx;
                         }
