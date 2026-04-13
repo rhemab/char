@@ -1051,7 +1051,7 @@ impl App {
     }
 
     fn scroll(&mut self) {
-        let offset = 8;
+        let offset = 10;
         let height = self.main_height - 1 - offset;
         // don't let cursor go beyond file length
         self.cursor_pos.y = self
