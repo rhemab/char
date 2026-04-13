@@ -561,7 +561,7 @@ impl App {
                 cursor_target_idx = range.0;
             }
             (Some(Motion::Percent), _) => {
-                if let Some(i) = matching_delimiter_idx(char_idx, &self.rope) {
+                if let Some(i) = matching_bracket_idx(&self.cursor_pos, char_idx, &self.rope) {
                     range.1 = i;
                     cursor_target_idx = range.1;
                     should_update_preferred_x = true;
@@ -1863,26 +1863,55 @@ fn inside_quotes(x: usize, y: usize, rope: &Rope, quote: char) -> Option<(usize,
     None
 }
 
-fn matching_delimiter_idx(char_idx: usize, rope: &Rope) -> Option<usize> {
+fn matching_bracket_idx(cursor_pos: &CursorPos, char_idx: usize, rope: &Rope) -> Option<usize> {
     let c = rope.char(char_idx);
-    let tokens = ['[', ']', '(', ')', '{', '}', '<', '>'];
+    let opening_brackets = ['[', '(', '{', '<'];
+    let closing_brackets = [']', ')', '}', '>'];
 
-    // if cursor is on opening goto closing
-    if tokens.contains(&c) {
-        return find_matching_delimiter(char_idx, rope, c);
+    // if cursor is on bracket
+    if opening_brackets.contains(&c) || closing_brackets.contains(&c) {
+        return find_matching_bracket(char_idx, rope, c);
     }
 
-    // if cursor is on closing goto opening
+    // if cursor is inside brackets inline
+    let x = cursor_pos.x;
+    let y = cursor_pos.y;
+    let line = rope.line(y);
+    let line_char_idx = rope.line_to_char(y);
+    let mut idx = x;
 
-    // find delimiter inline
-    // if outside, go to closing
-    // if inside, go to opening
-    // else, return
+    // search backwards for opening bracket
+    let mut count = 0;
+    while idx > 0 {
+        idx -= 1;
+        let c = line.char(idx);
+        if opening_brackets.contains(&c) {
+            if count == 0 {
+                return Some(line_char_idx + idx);
+            }
+            count -= 1;
+        } else if closing_brackets.contains(&c) {
+            count += 1;
+        }
+    }
+
+    // if outside brackets, find next bracket pair
+    let mut found_opening = false;
+    idx = x + 1;
+    while idx < line.len_chars() - 1 {
+        let c = line.char(idx);
+        if opening_brackets.contains(&c) {
+            found_opening = true;
+        } else if closing_brackets.contains(&c) && found_opening {
+            return Some(line_char_idx + idx);
+        }
+        idx += 1;
+    }
 
     None
 }
 
-fn find_matching_delimiter(char_idx: usize, rope: &Rope, token: char) -> Option<usize> {
+fn find_matching_bracket(char_idx: usize, rope: &Rope, token: char) -> Option<usize> {
     let mut idx = char_idx;
     let opening;
     let closing;
@@ -1923,7 +1952,6 @@ fn find_matching_delimiter(char_idx: usize, rope: &Rope, token: char) -> Option<
                     count -= 1;
                 }
             }
-
             idx += 1;
         }
     } else if token == closing {
