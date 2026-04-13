@@ -432,49 +432,49 @@ impl App {
         }
 
         // check for motion
-        match (command.motion, command.modifier) {
-            (Some(Motion::EnterSearchMode), _) => {
+        match (command.motion, command.action, command.modifier) {
+            (Some(Motion::EnterSearchMode), _, _) => {
                 self.cursor_pos.preferred_y = self.cursor_pos.y;
                 self.cursor_pos.preferred_x = self.cursor_pos.x;
                 self.change_mode(Mode::Search);
                 return;
             }
-            (Some(Motion::EnterCommandMode), _) => {
+            (Some(Motion::EnterCommandMode), _, _) => {
                 self.cursor_pos.preferred_y = self.cursor_pos.y;
                 self.cursor_pos.preferred_x = self.cursor_pos.x;
                 self.change_mode(Mode::Command);
                 return;
             }
-            (Some(Motion::FileStart), _) => {
+            (Some(Motion::FileStart), _, _) => {
                 range = (0, char_idx);
                 cursor_target_idx = 0;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::VisualMode), _) => {
+            (Some(Motion::VisualMode), _, _) => {
                 self.selection.ancor = char_idx;
                 self.selection.cursor = char_idx;
                 self.change_mode(Mode::Visual);
                 return;
             }
-            (Some(Motion::InsertMode), _) => {
+            (Some(Motion::InsertMode), _, _) => {
                 should_save_command = true;
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
             }
-            (Some(Motion::UpperInsert), _) => {
+            (Some(Motion::UpperInsert), _, _) => {
                 should_save_command = true;
                 cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
                 self.update_cursor_from_char_idx(cursor_target_idx);
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
             }
-            (Some(Motion::Append), _) => {
+            (Some(Motion::Append), _, _) => {
                 should_save_command = true;
                 self.cursor_pos.x += 1;
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
             }
-            (Some(Motion::UpperAppend), _) => {
+            (Some(Motion::UpperAppend), _, _) => {
                 should_save_command = true;
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
@@ -486,7 +486,7 @@ impl App {
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
             }
-            (Some(Motion::Left), _) => {
+            (Some(Motion::Left), _, _) => {
                 if self.cursor_pos.x == 0 {
                     return;
                 }
@@ -505,7 +505,7 @@ impl App {
                 should_update_preferred_x = true;
                 self.cursor_pos.x = self.cursor_pos.x.saturating_sub(count);
             }
-            (Some(Motion::Right), _) => {
+            (Some(Motion::Right), _, _) => {
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
                     return;
@@ -517,14 +517,31 @@ impl App {
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::Up), _) => {
-                // dk should delete two whole lines
+            (Some(Motion::Up), Some(action), _) => match action {
+                Action::Change => {
+                    let start = self
+                        .rope
+                        .line_to_char(self.cursor_pos.y.saturating_sub(count));
+                    let end = self
+                        .rope
+                        .line_to_char(self.cursor_pos.y + 1)
+                        .saturating_sub(1);
+                    range = (start, end);
+                }
+                _ => {
+                    let start = self
+                        .rope
+                        .line_to_char(self.cursor_pos.y.saturating_sub(count));
+                    let end = self.rope.line_to_char(self.cursor_pos.y + 1);
+                    range = (start, end);
+                }
+            },
+            (Some(Motion::Up), None, _) => {
                 self.cursor_pos.x = self.cursor_pos.preferred_x;
                 range = (char_idx, cursor_up_idx(&self.cursor_pos, count, &self.rope));
                 cursor_target_idx = range.1;
             }
-            (Some(Motion::Down), _) => {
-                // dj should delete two whole lines
+            (Some(Motion::Down), None, _) => {
                 self.cursor_pos.x = self.cursor_pos.preferred_x;
                 range = (
                     char_idx,
@@ -532,7 +549,7 @@ impl App {
                 );
                 cursor_target_idx = range.1;
             }
-            (Some(Motion::HalfScreenUp), _) => {
+            (Some(Motion::HalfScreenUp), _, _) => {
                 self.cursor_pos.x = self.cursor_pos.preferred_x;
                 range = (
                     char_idx,
@@ -540,7 +557,7 @@ impl App {
                 );
                 cursor_target_idx = range.1;
             }
-            (Some(Motion::HalfScreenDown), _) => {
+            (Some(Motion::HalfScreenDown), _, _) => {
                 self.cursor_pos.x = self.cursor_pos.preferred_x;
                 range = (
                     char_idx,
@@ -548,19 +565,19 @@ impl App {
                 );
                 cursor_target_idx = range.1;
             }
-            (Some(Motion::NextEmptyLine), _) => {
+            (Some(Motion::NextEmptyLine), _, _) => {
                 for _ in 0..count {
                     range = (char_idx, next_empty_line_idx(range.1, &self.rope));
                 }
                 cursor_target_idx = range.1;
             }
-            (Some(Motion::PrevEmptyLine), _) => {
+            (Some(Motion::PrevEmptyLine), _, _) => {
                 for _ in 0..count {
                     range = (prev_empty_line_idx(range.0, &self.rope), char_idx);
                 }
                 cursor_target_idx = range.0;
             }
-            (Some(Motion::Percent), _) => {
+            (Some(Motion::Percent), _, _) => {
                 if let Some(i) = matching_bracket_idx(&self.cursor_pos, char_idx, &self.rope) {
                     range.1 = i;
                     cursor_target_idx = range.1;
@@ -569,7 +586,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::Backtick), Some(modifier)) => {
+            (Some(Motion::Backtick), _, Some(modifier)) => {
                 if let Some(r) =
                     inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '`')
                 {
@@ -587,7 +604,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::SingleQuote), Some(modifier)) => {
+            (Some(Motion::SingleQuote), _, Some(modifier)) => {
                 if let Some(r) =
                     inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '\'')
                 {
@@ -605,7 +622,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::DoubleQuote), Some(modifier)) => {
+            (Some(Motion::DoubleQuote), _, Some(modifier)) => {
                 if let Some(r) =
                     inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '"')
                 {
@@ -623,7 +640,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::OpenAngleBracket), Some(modifier)) => {
+            (Some(Motion::OpenAngleBracket), _, Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '<', '>') {
                     match modifier {
                         commands::Modifier::Around => {
@@ -639,7 +656,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::OpenCurlyBrace), Some(modifier)) => {
+            (Some(Motion::OpenCurlyBrace), _, Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '{', '}') {
                     match modifier {
                         commands::Modifier::Around => {
@@ -655,7 +672,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::OpenBracket), Some(modifier)) => {
+            (Some(Motion::OpenBracket), _, Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '[', ']') {
                     match modifier {
                         commands::Modifier::Around => {
@@ -671,7 +688,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::OpenParen), Some(modifier)) => {
+            (Some(Motion::OpenParen), _, Some(modifier)) => {
                 if let Some(r) = inside_delimiter(char_idx, &self.rope, '(', ')') {
                     match modifier {
                         commands::Modifier::Around => {
@@ -687,7 +704,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::Word), Some(commands::Modifier::Inside)) => {
+            (Some(Motion::Word), _, Some(commands::Modifier::Inside)) => {
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
                     self.last_command = command.clone();
@@ -697,7 +714,7 @@ impl App {
                 cursor_target_idx = range.0;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::Word), None) => {
+            (Some(Motion::Word), _, None) => {
                 // delete, change, and yank should stop at \n
                 for _ in 0..count {
                     range = (char_idx, next_word_idx(range.1, &self.rope, action));
@@ -705,7 +722,7 @@ impl App {
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::UpperWord), Some(commands::Modifier::Inside)) => {
+            (Some(Motion::UpperWord), _, Some(commands::Modifier::Inside)) => {
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
                     self.last_command = command.clone();
@@ -715,14 +732,14 @@ impl App {
                 cursor_target_idx = range.0;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::UpperWord), _) => {
+            (Some(Motion::UpperWord), _, _) => {
                 for _ in 0..count {
                     range = (char_idx, upper_word_idx(range.1, &self.rope, action));
                 }
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::End), _) => {
+            (Some(Motion::End), _, _) => {
                 let mut range_end = char_idx;
                 for _ in 0..count {
                     range_end = word_end_idx(range_end, &self.rope);
@@ -731,28 +748,28 @@ impl App {
                 cursor_target_idx = range_end;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::UpperEnd), _) => {
+            (Some(Motion::UpperEnd), _, _) => {
                 for _ in 0..count {
                     range = (char_idx, upper_word_end_idx(range.1, &self.rope));
                 }
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::Back), _) => {
+            (Some(Motion::Back), _, _) => {
                 for _ in 0..count {
                     range = (prev_word_idx(range.0, &self.rope), char_idx);
                 }
                 cursor_target_idx = range.0;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::UpperBack), _) => {
+            (Some(Motion::UpperBack), _, _) => {
                 for _ in 0..count {
                     range = (upper_back_word_idx(range.0, &self.rope), char_idx);
                 }
                 cursor_target_idx = range.0;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::FirstWord), _) => {
+            (Some(Motion::FirstWord), _, _) => {
                 cursor_target_idx = first_word_idx(&self.cursor_pos, &self.rope);
                 range = (
                     char_idx.min(cursor_target_idx),
@@ -760,12 +777,12 @@ impl App {
                 );
                 should_update_preferred_x = true;
             }
-            (Some(Motion::LineStart), _) => {
+            (Some(Motion::LineStart), _, _) => {
                 range = (line_start_idx(self.cursor_pos.y, &self.rope), char_idx);
                 cursor_target_idx = range.0;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::LineEnd), _) => {
+            (Some(Motion::LineEnd), _, _) => {
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
                     return;
@@ -774,12 +791,12 @@ impl App {
                 range = (char_idx, cursor_target_idx);
                 self.cursor_pos.preferred_x = usize::MAX;
             }
-            (Some(Motion::FileEnd), _) => {
+            (Some(Motion::FileEnd), _, _) => {
                 range = (char_idx, file_end_idx(&self.rope));
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::NewLineBelow), _) => {
+            (Some(Motion::NewLineBelow), _, _) => {
                 should_save_command = true;
                 let (insert_pos, whitespace) = new_line_below_idx(&self.cursor_pos, &self.rope);
                 self.rope.insert(insert_pos, &format!("\n{}", whitespace));
@@ -788,7 +805,7 @@ impl App {
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
             }
-            (Some(Motion::NewLineAbove), _) => {
+            (Some(Motion::NewLineAbove), _, _) => {
                 should_save_command = true;
                 let (insert_pos, whitespace) = new_line_above_idx(&self.cursor_pos, &self.rope);
                 let insert_str = format!("{}\n", whitespace);
@@ -797,7 +814,7 @@ impl App {
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
             }
-            (Some(Motion::DeleteLine), _) | (Some(Motion::YankLine), _) => {
+            (Some(Motion::DeleteLine), _, _) | (Some(Motion::YankLine), _, _) => {
                 should_save_command = true;
                 range = (
                     self.rope.line_to_char(self.cursor_pos.y),
@@ -805,7 +822,7 @@ impl App {
                 );
                 yank_lines = true;
             }
-            (Some(Motion::ChangeLine), _) => {
+            (Some(Motion::ChangeLine), _, _) => {
                 should_save_command = true;
                 range = (
                     self.rope.line_to_char(self.cursor_pos.y),
@@ -813,17 +830,16 @@ impl App {
                 );
                 yank_lines = true;
             }
-            (Some(Motion::UpperChange), _) => {
+            (Some(Motion::UpperChange), _, _) => {
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
                     self.change_mode(Mode::Insert);
                     return;
                 }
-                cursor_target_idx = line_end_idx(char_idx, &self.rope);
-                range = (char_idx, cursor_target_idx);
+                range = (char_idx, line_end_idx(char_idx, &self.rope));
                 should_move_cursor = false;
             }
-            (Some(Motion::Paste), _) => {
+            (Some(Motion::Paste), _, _) => {
                 should_save_command = true;
                 if let Some(buf) = self.yank_buffer.get(&'"') {
                     match buf {
@@ -845,7 +861,7 @@ impl App {
                     }
                 }
             }
-            (Some(Motion::UpperPaste), _) => {
+            (Some(Motion::UpperPaste), _, _) => {
                 should_save_command = true;
                 if let Some(buf) = self.yank_buffer.get(&'"') {
                     match buf {
@@ -863,15 +879,15 @@ impl App {
                     }
                 }
             }
-            (Some(Motion::NextSearchResult), _) => {
+            (Some(Motion::NextSearchResult), _, _) => {
                 cursor_target_idx = next_search_result_idx(char_idx, &self.query, &self.rope);
                 should_update_preferred_x = true;
             }
-            (Some(Motion::PrevSearchResult), _) => {
+            (Some(Motion::PrevSearchResult), _, _) => {
                 cursor_target_idx = prev_search_result_idx(char_idx, &self.query, &self.rope);
                 should_update_preferred_x = true;
             }
-            (Some(Motion::Repeat), _) => {
+            (Some(Motion::Repeat), _, _) => {
                 self.execute_command(self.last_command.clone(), visual_mode, true);
                 if self.mode == Mode::Insert {
                     let idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
