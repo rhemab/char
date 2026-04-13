@@ -230,83 +230,77 @@ impl Parser {
         self.motion_buffer.push(key_event);
         if let Some(node) = self.trie.search(&self.motion_buffer) {
             if let Some(motion) = node.command {
-                let mut new_cmd = Command::default();
-                if let Some(cmd) = &self.command {
-                    new_cmd.count = cmd.count.clone();
-                    match (cmd.action, motion) {
-                        (Some(Action::Change), Motion::Word) => {
-                            new_cmd.motion = Some(Motion::End);
-                            new_cmd.action = Some(Action::Change);
-                            return Some(new_cmd);
+                let mut count = String::from("1");
+                if let Some(cmd) = &mut self.command {
+                    match (cmd.action, cmd.modifier, motion) {
+                        (Some(Action::Change), _, Motion::Word) => {
+                            cmd.motion = Some(Motion::End);
+                            return Some(cmd.clone());
                         }
-                        (Some(Action::Change), Motion::UpperWord) => {
-                            new_cmd.motion = Some(Motion::UpperEnd);
-                            new_cmd.action = Some(Action::Change);
-                            return Some(new_cmd);
+                        (Some(Action::Change), _, Motion::UpperWord) => {
+                            cmd.motion = Some(Motion::UpperEnd);
+                            return Some(cmd.clone());
                         }
-                        (Some(Action::Delete), Motion::Down) => {
-                            new_cmd.motion = Some(Motion::DeleteLine);
-                            new_cmd.action = Some(Action::Delete);
-                            new_cmd.count.clear();
-                            new_cmd.count.push('2');
-                            return Some(new_cmd);
+                        (Some(Action::Delete), _, Motion::Down) => {
+                            cmd.motion = Some(Motion::DeleteLine);
+                            cmd.count.clear();
+                            cmd.count.push('2');
+                            return Some(cmd.clone());
                         }
-                        (Some(Action::Change), Motion::Down) => {
-                            new_cmd.motion = Some(Motion::ChangeLine);
-                            new_cmd.action = Some(Action::Change);
-                            new_cmd.count.clear();
-                            new_cmd.count.push('2');
-                            return Some(new_cmd);
+                        (Some(Action::Change), _, Motion::Down) => {
+                            cmd.motion = Some(Motion::ChangeLine);
+                            cmd.count.clear();
+                            cmd.count.push('2');
+                            return Some(cmd.clone());
                         }
-                        (Some(Action::Yank), Motion::Down) => {
-                            new_cmd.motion = Some(Motion::YankLine);
-                            new_cmd.action = Some(Action::Yank);
-                            new_cmd.count.clear();
-                            new_cmd.count.push('2');
-                            return Some(new_cmd);
+                        (Some(Action::Yank), _, Motion::Down) => {
+                            cmd.motion = Some(Motion::YankLine);
+                            cmd.count.clear();
+                            cmd.count.push('2');
+                            return Some(cmd.clone());
+                        }
+                        (Some(_action), Some(_modifier), Motion::Back) => {
+                            cmd.motion = Some(Motion::OpenParen);
+                            return Some(cmd.clone());
+                        }
+                        (Some(_action), Some(_modifier), Motion::PrevEmptyLine) => {
+                            cmd.motion = Some(Motion::OpenCurlyBrace);
+                            return Some(cmd.clone());
+                        }
+                        (None, _, _) => {
+                            // if no action, extract count
+                            count = cmd.count.clone();
                         }
                         _ => {
-                            new_cmd.action = cmd.action;
-                            new_cmd.modifier = cmd.modifier;
+                            cmd.motion = Some(motion);
+                            return Some(cmd.clone());
                         }
                     }
                 }
+                let mut cmd = Command::default();
+                cmd.count = count;
                 match motion {
                     Motion::UpperChange => {
-                        new_cmd.motion = Some(motion);
-                        new_cmd.action = Some(Action::Change);
+                        cmd.motion = Some(motion);
+                        cmd.action = Some(Action::Change);
                     }
                     Motion::UpperDelete => {
-                        new_cmd.motion = Some(Motion::LineEnd);
-                        new_cmd.action = Some(Action::Delete);
+                        cmd.motion = Some(Motion::LineEnd);
+                        cmd.action = Some(Action::Delete);
                     }
                     Motion::UpperYank => {
-                        new_cmd.motion = Some(Motion::LineEnd);
-                        new_cmd.action = Some(Action::Yank);
+                        cmd.motion = Some(Motion::LineEnd);
+                        cmd.action = Some(Action::Yank);
                     }
                     Motion::DeleteChar => {
-                        new_cmd.motion = Some(Motion::Right);
-                        new_cmd.action = Some(Action::Delete);
-                    }
-                    Motion::Back => {
-                        if new_cmd.action.is_some() && new_cmd.modifier.is_some() {
-                            new_cmd.motion = Some(Motion::OpenParen);
-                        } else {
-                            new_cmd.motion = Some(motion);
-                        }
-                    }
-                    Motion::PrevEmptyLine => {
-                        if new_cmd.action.is_some() && new_cmd.modifier.is_some() {
-                            new_cmd.motion = Some(Motion::OpenCurlyBrace);
-                        } else {
-                            new_cmd.motion = Some(motion);
-                        }
+                        cmd.motion = Some(Motion::Right);
+                        cmd.action = Some(Action::Delete);
                     }
                     _ => {
-                        new_cmd.motion = Some(motion);
+                        cmd.motion = Some(motion);
                     }
                 }
-                return Some(new_cmd);
+                return Some(cmd);
             }
             // return none here so that the buffer doesn't reset
             // because we found a node but not yet a command
