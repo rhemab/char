@@ -233,15 +233,36 @@ impl Parser {
                 let mut new_cmd = Command::default();
                 if let Some(cmd) = &self.command {
                     new_cmd.count = cmd.count.clone();
-                    match (cmd.action, cmd.modifier, motion) {
-                        (Some(Action::Change), None, Motion::Word) => {
+                    match (cmd.action, motion) {
+                        (Some(Action::Change), Motion::Word) => {
                             new_cmd.motion = Some(Motion::End);
                             new_cmd.action = Some(Action::Change);
                             return Some(new_cmd);
                         }
-                        (Some(Action::Change), None, Motion::UpperWord) => {
+                        (Some(Action::Change), Motion::UpperWord) => {
                             new_cmd.motion = Some(Motion::UpperEnd);
                             new_cmd.action = Some(Action::Change);
+                            return Some(new_cmd);
+                        }
+                        (Some(Action::Delete), Motion::Down) => {
+                            new_cmd.motion = Some(Motion::DeleteLine);
+                            new_cmd.action = Some(Action::Delete);
+                            new_cmd.count.clear();
+                            new_cmd.count.push('2');
+                            return Some(new_cmd);
+                        }
+                        (Some(Action::Change), Motion::Down) => {
+                            new_cmd.motion = Some(Motion::ChangeLine);
+                            new_cmd.action = Some(Action::Change);
+                            new_cmd.count.clear();
+                            new_cmd.count.push('2');
+                            return Some(new_cmd);
+                        }
+                        (Some(Action::Yank), Motion::Down) => {
+                            new_cmd.motion = Some(Motion::YankLine);
+                            new_cmd.action = Some(Action::Yank);
+                            new_cmd.count.clear();
+                            new_cmd.count.push('2');
                             return Some(new_cmd);
                         }
                         _ => {

@@ -801,7 +801,7 @@ impl App {
                 should_save_command = true;
                 range = (
                     self.rope.line_to_char(self.cursor_pos.y),
-                    self.rope.line_to_char(self.cursor_pos.y + 1),
+                    self.rope.line_to_char(self.cursor_pos.y + count),
                 );
                 yank_lines = true;
             }
@@ -809,7 +809,7 @@ impl App {
                 should_save_command = true;
                 range = (
                     self.rope.line_to_char(self.cursor_pos.y),
-                    self.rope.line_to_char(self.cursor_pos.y + 1) - 1,
+                    self.rope.line_to_char(self.cursor_pos.y + count) - 1,
                 );
                 yank_lines = true;
             }
