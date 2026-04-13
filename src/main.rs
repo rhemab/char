@@ -917,6 +917,24 @@ impl App {
                     return;
                 }
             }
+            (
+                None,
+                _,
+                Some(commands::Modifier::Find {
+                    c,
+                    forwards,
+                    inclusive,
+                }),
+            ) => {
+                if let Some(idx) =
+                    find_char_inline(&self.cursor_pos, &self.rope, c, forwards, inclusive)
+                {
+                    let start = char_idx.min(idx);
+                    let end = char_idx.max(idx);
+                    range = (start, end);
+                    cursor_target_idx = idx;
+                }
+            }
             _ => {}
         }
 
@@ -2013,6 +2031,47 @@ fn find_matching_bracket(char_idx: usize, rope: &Rope, token: char) -> Option<us
                     return Some(idx);
                 } else {
                     count -= 1;
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn find_char_inline(
+    cursor_pos: &CursorPos,
+    rope: &Rope,
+    query: char,
+    forwards: bool,
+    inclusive: bool,
+) -> Option<usize> {
+    let line_char_idx = rope.line_to_char(cursor_pos.y);
+    let line = rope.line(cursor_pos.y);
+    let mut idx = cursor_pos.x;
+
+    if forwards {
+        idx += 1;
+        while idx < line.len_chars() {
+            let c = line.char(idx);
+            if c == query {
+                if inclusive {
+                    return Some(line_char_idx + idx);
+                } else {
+                    return Some(line_char_idx + idx - 1);
+                }
+            }
+            idx += 1;
+        }
+    } else {
+        while idx > 0 {
+            idx -= 1;
+            let c = line.char(idx);
+            if c == query {
+                if inclusive {
+                    return Some(line_char_idx + idx);
+                } else {
+                    return Some(line_char_idx + idx + 1);
                 }
             }
         }

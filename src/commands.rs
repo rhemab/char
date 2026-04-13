@@ -54,6 +54,8 @@ pub enum Motion {
     Backtick,
     Percent,
     Star,
+    Comma,
+    Semicolon,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +69,16 @@ pub enum Action {
 pub enum Modifier {
     Inside,
     Around,
+    Find {
+        c: char,
+        forwards: bool,
+        inclusive: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PendingCmd {
+    Find { forwards: bool, inclusive: bool },
 }
 
 #[derive(Default, Debug, Clone)]
@@ -82,6 +94,8 @@ pub struct Parser {
     pub motion_buffer: Vec<KeyEvent>,
     pub command: Option<Command>,
     pub input_buffer: String,
+    pending_cmd: Option<PendingCmd>,
+    last_find_cmd: Option<Modifier>,
 }
 
 impl Default for Parser {
@@ -91,6 +105,8 @@ impl Default for Parser {
             motion_buffer: vec![],
             command: None,
             input_buffer: String::new(),
+            pending_cmd: None,
+            last_find_cmd: None,
         }
     }
 }
@@ -100,9 +116,42 @@ impl Parser {
         self.input_buffer.clear();
         self.motion_buffer.clear();
         self.command = None;
+        self.pending_cmd = None;
     }
 
     pub fn generate_command(&mut self, key_event: KeyEvent, visual_mode: bool) -> Option<Command> {
+        if let Some(pending_cmd) = self.pending_cmd {
+            match (pending_cmd, key_event.code, key_event.modifiers) {
+                (
+                    PendingCmd::Find {
+                        forwards,
+                        inclusive,
+                    },
+                    KeyCode::Char(c),
+                    KeyModifiers::NONE | KeyModifiers::SHIFT,
+                ) => {
+                    let find_cmd = Modifier::Find {
+                        c,
+                        forwards,
+                        inclusive,
+                    };
+                    self.last_find_cmd = Some(find_cmd);
+                    if let Some(cmd) = &mut self.command {
+                        cmd.modifier = Some(find_cmd);
+                        return Some(cmd.clone());
+                    }
+                    return Some(Command {
+                        modifier: Some(find_cmd),
+                        ..Command::default()
+                    });
+                }
+                _ => {
+                    self.reset();
+                    return None;
+                }
+            }
+        }
+
         match key_event.code {
             KeyCode::Char(c) => {
                 self.input_buffer.push(c);
@@ -224,6 +273,34 @@ impl Parser {
                     }
                 }
             }
+            (KeyCode::Char('t'), KeyModifiers::NONE) => {
+                self.pending_cmd = Some(PendingCmd::Find {
+                    forwards: true,
+                    inclusive: false,
+                });
+                return None;
+            }
+            (KeyCode::Char('f'), KeyModifiers::NONE) => {
+                self.pending_cmd = Some(PendingCmd::Find {
+                    forwards: true,
+                    inclusive: true,
+                });
+                return None;
+            }
+            (KeyCode::Char('T'), KeyModifiers::SHIFT) => {
+                self.pending_cmd = Some(PendingCmd::Find {
+                    forwards: false,
+                    inclusive: false,
+                });
+                return None;
+            }
+            (KeyCode::Char('F'), KeyModifiers::SHIFT) => {
+                self.pending_cmd = Some(PendingCmd::Find {
+                    forwards: false,
+                    inclusive: true,
+                });
+                return None;
+            }
             _ => {}
         }
 
@@ -268,6 +345,40 @@ impl Parser {
                             cmd.motion = Some(Motion::OpenCurlyBrace);
                             return Some(cmd.clone());
                         }
+                        (_, None, Motion::Comma) => match self.last_find_cmd {
+                            Some(Modifier::Find {
+                                c,
+                                forwards,
+                                inclusive,
+                            }) => {
+                                cmd.modifier = Some(Modifier::Find {
+                                    c,
+                                    forwards: !forwards,
+                                    inclusive,
+                                });
+                            }
+                            _ => {
+                                self.reset();
+                                return None;
+                            }
+                        },
+                        (_, None, Motion::Semicolon) => match self.last_find_cmd {
+                            Some(Modifier::Find {
+                                c,
+                                forwards,
+                                inclusive,
+                            }) => {
+                                cmd.modifier = Some(Modifier::Find {
+                                    c,
+                                    forwards,
+                                    inclusive,
+                                });
+                            }
+                            _ => {
+                                self.reset();
+                                return None;
+                            }
+                        },
                         (None, _, _) => {
                             // if no action, extract count
                             count = cmd.count.clone();
@@ -297,6 +408,40 @@ impl Parser {
                         cmd.motion = Some(Motion::Right);
                         cmd.action = Some(Action::Delete);
                     }
+                    Motion::Comma => match self.last_find_cmd {
+                        Some(Modifier::Find {
+                            c,
+                            forwards,
+                            inclusive,
+                        }) => {
+                            cmd.modifier = Some(Modifier::Find {
+                                c,
+                                forwards: !forwards,
+                                inclusive,
+                            });
+                        }
+                        _ => {
+                            self.reset();
+                            return None;
+                        }
+                    },
+                    Motion::Semicolon => match self.last_find_cmd {
+                        Some(Modifier::Find {
+                            c,
+                            forwards,
+                            inclusive,
+                        }) => {
+                            cmd.modifier = Some(Modifier::Find {
+                                c,
+                                forwards,
+                                inclusive,
+                            });
+                        }
+                        _ => {
+                            self.reset();
+                            return None;
+                        }
+                    },
                     _ => {
                         cmd.motion = Some(motion);
                     }
@@ -503,6 +648,14 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('*'), KeyModifiers::empty())],
         Motion::Star,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char(','), KeyModifiers::empty())],
+        Motion::Comma,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char(';'), KeyModifiers::empty())],
+        Motion::Semicolon,
     );
 
     trie
