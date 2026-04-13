@@ -419,7 +419,6 @@ impl App {
         eprintln!("Command: {:?}", command);
 
         let action = command.action.is_some();
-        let mut yank_lines = false;
         let mut should_update_preferred_x = false;
         let mut should_move_cursor = true;
         let mut should_save_command = false;
@@ -814,13 +813,12 @@ impl App {
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
             }
-            (Some(Motion::DeleteLine), _, _) | (Some(Motion::YankLine), _, _) => {
+            (Some(Motion::DeleteLine) | Some(Motion::YankLine), _, _) => {
                 should_save_command = true;
                 range = (
                     self.rope.line_to_char(self.cursor_pos.y),
                     self.rope.line_to_char(self.cursor_pos.y + count),
                 );
-                yank_lines = true;
             }
             (Some(Motion::ChangeLine), _, _) => {
                 should_save_command = true;
@@ -828,7 +826,6 @@ impl App {
                     self.rope.line_to_char(self.cursor_pos.y),
                     self.rope.line_to_char(self.cursor_pos.y + count) - 1,
                 );
-                yank_lines = true;
             }
             (Some(Motion::UpperChange), _, _) => {
                 let rope_line = self.rope.line(self.cursor_pos.y);
@@ -906,6 +903,17 @@ impl App {
             Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
                 // yank slice to buffer
                 if let Some(slice) = self.rope.get_slice(range.0..range.1) {
+                    let mut yank_lines = false;
+                    let mut count = 0;
+                    for c in slice.chars() {
+                        if c == '\n' {
+                            count += 1;
+                        }
+                        if count > 1 {
+                            yank_lines = true;
+                            break;
+                        }
+                    }
                     let new_content = if yank_lines {
                         YankBuffer::Lines(String::from(slice))
                     } else {
