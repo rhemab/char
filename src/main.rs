@@ -182,9 +182,10 @@ impl App {
                 let line_start_char = self.rope.line_to_char(line_num);
                 let line_end_char = line_start_char + line_length;
 
-                let line_in_selection = (self.mode == Mode::Visual || self.highlight_yank)
-                    && line_end_char > start_select_rng
-                    && line_start_char <= end_select_rng;
+                let line_in_selection =
+                    (self.mode == Mode::Visual || self.mode == Mode::Search || self.highlight_yank)
+                        && line_end_char > start_select_rng
+                        && line_start_char <= end_select_rng;
 
                 if line_in_selection {
                     let mut line_of_spans = vec![];
@@ -393,9 +394,21 @@ impl App {
                     self.cursor_pos.y = self.cursor_pos.preferred_y;
                     self.cursor_pos.x = self.cursor_pos.preferred_x;
                     self.return_to_normal_mode();
-                    self.scroll();
+                    self.scroll(self.cursor_pos.y);
                 }
-                KeyCode::Char(c) => self.command_bar.push(c),
+                KeyCode::Char(c) => {
+                    self.command_bar.push(c);
+                    let query = &self.command_bar.as_str()[1..];
+                    self.query = query.to_string();
+                    let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
+                        + self.cursor_pos.preferred_x;
+                    if let Some(idx) = next_search_result_idx(char_idx, query, &self.rope) {
+                        self.selection.ancor = idx;
+                        self.selection.cursor = idx + query.len() - 1;
+                        let target_y = self.rope.char_to_line(idx);
+                        self.scroll(target_y);
+                    }
+                }
                 KeyCode::Backspace => {
                     self.command_bar.pop();
                     if self.command_bar.is_empty() {
@@ -1028,7 +1041,7 @@ impl App {
             self.cursor_pos.preferred_x = self.cursor_pos.x;
         }
 
-        self.scroll();
+        self.scroll(self.cursor_pos.y);
     }
 
     fn insert_text(&mut self, e: KeyEvent) {
@@ -1095,26 +1108,21 @@ impl App {
             self.rope.insert(idx, &text);
             self.last_insertion += &text;
         }
-        self.scroll();
+        self.scroll(self.cursor_pos.y);
     }
 
-    fn scroll(&mut self) {
+    fn scroll(&mut self, target_y: usize) {
         let offset = 10;
         let height = self.main_height - 1 - offset;
         // don't let cursor go beyond file length
-        self.cursor_pos.y = self
-            .cursor_pos
-            .y
-            .min(self.rope.len_lines().saturating_sub(2));
+        // self.cursor_pos.y = target_y.min(self.rope.len_lines().saturating_sub(2));
 
-        let y = self.cursor_pos.y;
-
-        if y.saturating_sub(self.top_line) >= height {
+        if target_y.saturating_sub(self.top_line) >= height {
             // scroll down
-            self.top_line = y.saturating_sub(height);
-        } else if y <= self.top_line + offset {
+            self.top_line = target_y.saturating_sub(height);
+        } else if target_y <= self.top_line + offset {
             // scroll up
-            self.top_line = y.saturating_sub(offset);
+            self.top_line = target_y.saturating_sub(offset);
         }
     }
 
@@ -1123,6 +1131,7 @@ impl App {
         self.parser.reset();
         self.ensure_valid_normal_pos();
         self.cursor_pos.preferred_x = self.cursor_pos.x;
+        self.scroll(self.cursor_pos.y);
     }
 
     fn exit(&mut self) {
@@ -1137,6 +1146,8 @@ impl App {
                 }
             }
             Mode::Search => {
+                self.selection.ancor = usize::MAX;
+                self.selection.cursor = usize::MAX;
                 self.command_bar.clear();
                 self.command_bar.push_str("/");
             }
