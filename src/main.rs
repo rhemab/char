@@ -930,7 +930,10 @@ impl App {
                     find_char_inline(&self.cursor_pos, &self.rope, c, forwards, inclusive)
                 {
                     let start = char_idx.min(idx);
-                    let end = char_idx.max(idx);
+                    let mut end = char_idx.max(idx);
+                    if forwards {
+                        end += 1;
+                    }
                     range = (start, end);
                     cursor_target_idx = idx;
                 }
