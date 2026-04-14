@@ -936,6 +936,8 @@ impl App {
                     }
                     range = (start, end);
                     cursor_target_idx = idx;
+                } else {
+                    return;
                 }
             }
             _ => {}

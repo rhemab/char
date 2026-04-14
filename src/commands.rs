@@ -356,6 +356,7 @@ impl Parser {
                                     forwards: !forwards,
                                     inclusive,
                                 });
+                                return Some(cmd.clone());
                             }
                             _ => {
                                 self.reset();
@@ -373,6 +374,7 @@ impl Parser {
                                     forwards,
                                     inclusive,
                                 });
+                                return Some(cmd.clone());
                             }
                             _ => {
                                 self.reset();
