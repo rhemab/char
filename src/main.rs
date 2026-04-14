@@ -940,6 +940,9 @@ impl App {
                     return;
                 }
             }
+            (Some(Motion::Substitute), Some(_action), None) => {
+                range = (char_idx, char_idx + count);
+            }
             _ => {}
         }
 

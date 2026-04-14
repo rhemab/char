@@ -56,6 +56,7 @@ pub enum Motion {
     Star,
     Comma,
     Semicolon,
+    Substitute,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -444,6 +445,10 @@ impl Parser {
                             return None;
                         }
                     },
+                    Motion::ChangeLine | Motion::Substitute => {
+                        cmd.action = Some(Action::Change);
+                        cmd.motion = Some(motion);
+                    }
                     _ => {
                         cmd.motion = Some(motion);
                     }
@@ -658,6 +663,14 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char(';'), KeyModifiers::empty())],
         Motion::Semicolon,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty())],
+        Motion::Substitute,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('S'), KeyModifiers::empty())],
+        Motion::ChangeLine,
     );
 
     trie
