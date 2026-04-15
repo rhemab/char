@@ -17,6 +17,9 @@ use crate::commands::*;
 mod commands;
 mod trie;
 
+const HIGHLIGHT_DURATION: u64 = 150;
+const SCROLL_OFFSET: usize = 10;
+
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
     ratatui::run(|terminal| App::default().run(terminal))?;
@@ -326,7 +329,7 @@ impl App {
 
     fn handle_events(&mut self) -> io::Result<()> {
         if self.redraw {
-            match event::poll(std::time::Duration::from_millis(150)) {
+            match event::poll(std::time::Duration::from_millis(HIGHLIGHT_DURATION)) {
                 Ok(false) => {
                     self.redraw = false;
                     return Ok(());
@@ -367,38 +370,59 @@ impl App {
             _ => {}
         }
         match &mut self.mode {
-            Mode::Command | Mode::Search => match key_event.code {
-                KeyCode::Enter => {
-                    match self.command_bar.as_str() {
-                        ":q" => {
-                            self.exit();
-                            return;
-                        }
-                        _ => {
-                            if self.mode == Mode::Search {
-                                let query = &self.command_bar.as_str()[1..];
-                                self.query = query.to_string();
-                                let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
-                                    + self.cursor_pos.preferred_x;
-                                if let Some(idx) =
-                                    next_search_result_idx(char_idx, query, &self.rope)
-                                {
-                                    let cursor_target_idx = idx;
-                                    self.update_cursor_from_char_idx(cursor_target_idx);
-                                    self.cursor_pos.preferred_y = self.cursor_pos.y;
-                                    self.cursor_pos.preferred_x = self.cursor_pos.x;
+            Mode::Command | Mode::Search => {
+                match key_event.code {
+                    KeyCode::Enter => {
+                        match self.command_bar.as_str() {
+                            ":q" => {
+                                self.exit();
+                                return;
+                            }
+                            _ => {
+                                if self.mode == Mode::Search {
+                                    let query = &self.command_bar.as_str()[1..];
+                                    self.query = query.to_string();
+                                    let char_idx =
+                                        self.rope.line_to_char(self.cursor_pos.preferred_y)
+                                            + self.cursor_pos.preferred_x;
+                                    if let Some(idx) =
+                                        next_search_result_idx(char_idx, query, &self.rope)
+                                    {
+                                        let cursor_target_idx = idx;
+                                        self.update_cursor_from_char_idx(cursor_target_idx);
+                                        self.cursor_pos.preferred_y = self.cursor_pos.y;
+                                        self.cursor_pos.preferred_x = self.cursor_pos.x;
+                                    }
                                 }
                             }
                         }
+                        self.cursor_pos.y = self.cursor_pos.preferred_y;
+                        self.cursor_pos.x = self.cursor_pos.preferred_x;
+                        self.return_to_normal_mode();
+                        self.scroll(self.cursor_pos.y);
+                        return;
                     }
-                    self.cursor_pos.y = self.cursor_pos.preferred_y;
-                    self.cursor_pos.x = self.cursor_pos.preferred_x;
-                    self.return_to_normal_mode();
-                    self.scroll(self.cursor_pos.y);
+                    KeyCode::Char(c) => {
+                        self.command_bar.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        self.command_bar.pop();
+                        if self.command_bar.is_empty() {
+                            self.cursor_pos.y = self.cursor_pos.preferred_y;
+                            self.cursor_pos.x = self.cursor_pos.preferred_x;
+                            self.return_to_normal_mode();
+                        }
+                    }
+                    _ => {}
                 }
-                KeyCode::Char(c) => {
-                    self.command_bar.push(c);
+                if self.mode == Mode::Search {
                     let query = &self.command_bar.as_str()[1..];
+                    if query.is_empty() {
+                        self.selection.ancor = usize::MAX;
+                        self.selection.cursor = usize::MAX;
+                        self.scroll(self.cursor_pos.preferred_y);
+                        return;
+                    }
                     self.query = query.to_string();
                     let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
                         + self.cursor_pos.preferred_x;
@@ -409,16 +433,7 @@ impl App {
                         self.scroll(target_y);
                     }
                 }
-                KeyCode::Backspace => {
-                    self.command_bar.pop();
-                    if self.command_bar.is_empty() {
-                        self.cursor_pos.y = self.cursor_pos.preferred_y;
-                        self.cursor_pos.x = self.cursor_pos.preferred_x;
-                        self.return_to_normal_mode();
-                    }
-                }
-                _ => {}
-            },
+            }
             Mode::Insert => self.insert_text(key_event),
             _ => {
                 let visual_mode = self.mode == Mode::Visual;
@@ -1112,7 +1127,7 @@ impl App {
     }
 
     fn scroll(&mut self, target_y: usize) {
-        let offset = 10;
+        let offset = SCROLL_OFFSET;
         let height = self.main_height - 1 - offset;
         // don't let cursor go beyond file length
         // self.cursor_pos.y = target_y.min(self.rope.len_lines().saturating_sub(2));
