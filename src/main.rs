@@ -378,28 +378,44 @@ impl App {
                                 self.exit();
                                 return;
                             }
-                            _ => {
-                                if self.mode == Mode::Search {
-                                    let query = &self.command_bar.as_str()[1..];
-                                    self.query = query.to_string();
-                                    let char_idx =
-                                        self.rope.line_to_char(self.cursor_pos.preferred_y)
-                                            + self.cursor_pos.preferred_x;
-                                    if let Some(idx) =
-                                        next_search_result_idx(char_idx, query, &self.rope)
-                                    {
-                                        let cursor_target_idx = idx;
-                                        self.update_cursor_from_char_idx(cursor_target_idx);
-                                        self.cursor_pos.preferred_y = self.cursor_pos.y;
-                                        self.cursor_pos.preferred_x = self.cursor_pos.x;
-                                    }
-                                }
+                            _ => {}
+                        }
+                        if self.mode == Mode::Search {
+                            self.query = extract_query(&self.command_bar);
+                            let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
+                                + self.cursor_pos.preferred_x;
+                            if let Some(idx) =
+                                next_search_result_idx(char_idx, &self.query, &self.rope)
+                            {
+                                let cursor_target_idx = idx;
+                                self.update_cursor_from_char_idx(cursor_target_idx);
+                                self.cursor_pos.preferred_y = self.cursor_pos.y;
+                                self.cursor_pos.preferred_x = self.cursor_pos.x;
                             }
                         }
                         self.cursor_pos.y = self.cursor_pos.preferred_y;
                         self.cursor_pos.x = self.cursor_pos.preferred_x;
                         self.return_to_normal_mode();
                         self.scroll(self.cursor_pos.y);
+
+                        // replace all
+                        if self.command_bar.starts_with(":%s/") {
+                            let replacment = extract_replacment(&self.command_bar);
+                            if self.query.is_empty() || replacment.is_empty() {
+                                return;
+                            }
+
+                            let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
+                                + self.cursor_pos.preferred_x;
+                            while let Some(idx) =
+                                next_search_result_idx(char_idx, &self.query, &self.rope)
+                            {
+                                // replace text
+                                self.rope.remove(idx..idx + self.query.len());
+                                self.rope.insert(idx, &replacment);
+                            }
+                        }
+
                         return;
                     }
                     KeyCode::Char(c) => {
@@ -415,20 +431,23 @@ impl App {
                     }
                     _ => {}
                 }
+
+                if self.command_bar.starts_with(":%s/") {
+                    self.mode = Mode::Search;
+                }
                 if self.mode == Mode::Search {
-                    let query = &self.command_bar.as_str()[1..];
-                    if query.is_empty() {
+                    self.query = extract_query(&self.command_bar);
+                    if self.query.is_empty() {
                         self.selection.ancor = usize::MAX;
                         self.selection.cursor = usize::MAX;
                         self.scroll(self.cursor_pos.preferred_y);
                         return;
                     }
-                    self.query = query.to_string();
                     let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
                         + self.cursor_pos.preferred_x;
-                    if let Some(idx) = next_search_result_idx(char_idx, query, &self.rope) {
+                    if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope) {
                         self.selection.ancor = idx;
-                        self.selection.cursor = idx + query.len() - 1;
+                        self.selection.cursor = idx + self.query.len() - 1;
                         let target_y = self.rope.char_to_line(idx);
                         self.scroll(target_y);
                     }
@@ -938,6 +957,9 @@ impl App {
                 let word_range = inside_word(char_idx, &self.rope);
                 let word = self.rope.slice(word_range.0..word_range.1);
                 self.query = word.to_string();
+                self.command_bar.clear();
+                self.command_bar.push('/');
+                self.command_bar.push_str(&self.query);
                 if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope) {
                     cursor_target_idx = idx;
                     should_update_preferred_x = true;
@@ -2112,4 +2134,39 @@ fn find_char_inline(
     }
 
     None
+}
+
+fn extract_query(s: &str) -> String {
+    let mut query = String::new();
+    let mut start = false;
+    for c in s.chars() {
+        if c == '/' {
+            if !start {
+                start = true;
+            } else {
+                break;
+            }
+        } else if start {
+            query.push(c);
+        }
+    }
+
+    query
+}
+
+fn extract_replacment(s: &str) -> String {
+    let mut replacment = String::new();
+    let mut count = 0;
+    for c in s.chars() {
+        if c == '/' {
+            count += 1;
+            if count > 2 {
+                break;
+            }
+        } else if count > 1 {
+            replacment.push(c);
+        }
+    }
+
+    replacment
 }
