@@ -531,7 +531,6 @@ impl App {
                 }
                 cursor_target_idx = line_end_idx(char_idx, &self.rope);
                 self.update_cursor_from_char_idx(cursor_target_idx);
-                self.cursor_pos.x += 1;
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
             }
@@ -1086,16 +1085,37 @@ impl App {
         let mut idx = 0;
         match e.code {
             KeyCode::Char(c) => {
-                let i = self.rope.line_to_char(self.cursor_pos.y);
+                let pairs = [
+                    ['[', ']'],
+                    ['{', '}'],
+                    ['(', ')'],
+                    ['<', '>'],
+                    ['"', '"'],
+                    ['\'', '\''],
+                    ['`', '`'],
+                ];
+                let mut text = String::from(c);
+                let y = self.rope.line_to_char(self.cursor_pos.y);
                 let x = self.cursor_pos.x;
-                idx = i + x;
-                text_to_insert = Some(String::from(c));
+                idx = y + x;
+                if let Some(pair) = pairs.iter().find(|e| e.contains(&c)) {
+                    if pair[0] == c {
+                        text.push(pair[1]);
+                    } else {
+                        if self.rope.char(idx) == c {
+                            text.clear();
+                        }
+                    }
+                }
+                if !text.is_empty() {
+                    text_to_insert = Some(text);
+                }
                 self.cursor_pos.x += 1;
             }
             KeyCode::Tab => {
-                let i = self.rope.line_to_char(self.cursor_pos.y);
+                let y = self.rope.line_to_char(self.cursor_pos.y);
                 let x = self.cursor_pos.x;
-                idx = i + x;
+                idx = y + x;
                 text_to_insert = Some(String::from("    "));
                 self.cursor_pos.x += 4;
             }
