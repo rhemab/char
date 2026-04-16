@@ -689,7 +689,7 @@ impl App {
                 }
             }
             (Some(Motion::OpenAngleBracket), _, Some(modifier)) => {
-                if let Some(r) = inside_delimiter(char_idx, &self.rope, '<', '>') {
+                if let Some(r) = inside_brackets(char_idx, &self.rope, '<', '>') {
                     match modifier {
                         commands::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
@@ -705,7 +705,7 @@ impl App {
                 }
             }
             (Some(Motion::OpenCurlyBrace), _, Some(modifier)) => {
-                if let Some(r) = inside_delimiter(char_idx, &self.rope, '{', '}') {
+                if let Some(r) = inside_brackets(char_idx, &self.rope, '{', '}') {
                     match modifier {
                         commands::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
@@ -721,7 +721,7 @@ impl App {
                 }
             }
             (Some(Motion::OpenBracket), _, Some(modifier)) => {
-                if let Some(r) = inside_delimiter(char_idx, &self.rope, '[', ']') {
+                if let Some(r) = inside_brackets(char_idx, &self.rope, '[', ']') {
                     match modifier {
                         commands::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
@@ -737,7 +737,7 @@ impl App {
                 }
             }
             (Some(Motion::OpenParen), _, Some(modifier)) => {
-                if let Some(r) = inside_delimiter(char_idx, &self.rope, '(', ')') {
+                if let Some(r) = inside_brackets(char_idx, &self.rope, '(', ')') {
                     match modifier {
                         commands::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
@@ -846,12 +846,38 @@ impl App {
             }
             (Some(Motion::NewLineBelow), _, _) => {
                 should_save_command = true;
-                let (insert_pos, whitespace) = new_line_below_idx(&self.cursor_pos, &self.rope);
-                self.rope.insert(insert_pos, &format!("\n{}", whitespace));
-                self.cursor_pos.y += 1;
-                self.cursor_pos.x = whitespace.chars().count();
                 self.change_mode(Mode::Insert);
                 should_move_cursor = false;
+                // auto indent
+                // respect previous line whitespace
+                // if inside pair, add tab
+
+                let y = self.cursor_pos.y;
+                let mut text = String::from('\n');
+                let opening_brackets = ['[', '(', '{', '<'];
+                let last_char_idx = line_end_idx(char_idx, &self.rope);
+                let last_char = self.rope.char(last_char_idx.saturating_sub(1));
+
+                if opening_brackets.contains(&last_char) {
+                    // get whitespace of current line
+                    let curr_line = self.rope.line(y);
+                    let whitespace: String = curr_line
+                        .chars()
+                        .take_while(|c| c.is_whitespace() && *c != '\n' && *c != '\r')
+                        .collect();
+                    // add tab & new line
+                    text.push_str(&whitespace);
+                    text.push_str("    ");
+                    self.rope.insert(last_char_idx, &text);
+                    self.last_insertion += "\n";
+                    let cursor_target_idx = last_char_idx + whitespace.len() + 5;
+                    self.update_cursor_from_char_idx(cursor_target_idx);
+                } else {
+                    let (insert_pos, whitespace) = new_line_below_idx(&self.cursor_pos, &self.rope);
+                    self.rope.insert(insert_pos, &format!("\n{}", whitespace));
+                    self.cursor_pos.y += 1;
+                    self.cursor_pos.x = whitespace.chars().count();
+                }
             }
             (Some(Motion::NewLineAbove), _, _) => {
                 should_save_command = true;
@@ -1082,7 +1108,9 @@ impl App {
 
     fn insert_text(&mut self, e: KeyEvent) {
         let mut text_to_insert = None;
-        let mut idx = 0;
+        let y = self.rope.line_to_char(self.cursor_pos.y);
+        let x = self.cursor_pos.x;
+        let idx = x + y;
         match e.code {
             KeyCode::Char(c) => {
                 let pairs = [
@@ -1095,9 +1123,6 @@ impl App {
                     ['`', '`'],
                 ];
                 let mut text = String::from(c);
-                let y = self.rope.line_to_char(self.cursor_pos.y);
-                let x = self.cursor_pos.x;
-                idx = y + x;
                 if let Some(pair) = pairs.iter().find(|e| e.contains(&c)) {
                     if pair[0] == c {
                         text.push(pair[1]);
@@ -1113,9 +1138,6 @@ impl App {
                 self.cursor_pos.x += 1;
             }
             KeyCode::Tab => {
-                let y = self.rope.line_to_char(self.cursor_pos.y);
-                let x = self.cursor_pos.x;
-                idx = y + x;
                 text_to_insert = Some(String::from("    "));
                 self.cursor_pos.x += 4;
             }
@@ -1126,7 +1148,6 @@ impl App {
 
                 if x > 0 {
                     // NORMAL BACKSPACE: Just delete the char to the left
-                    idx = self.rope.line_to_char(y) + x;
                     self.rope.remove(idx - 1..idx);
                     self.cursor_pos.x -= 1;
                 } else if y > 0 {
@@ -1152,12 +1173,60 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                let i = self.rope.line_to_char(self.cursor_pos.y);
-                let x = self.cursor_pos.x;
-                idx = i + x;
-                text_to_insert = Some(String::from('\n'));
-                self.cursor_pos.y += 1;
-                self.cursor_pos.x = 0;
+                // auto indent
+                // respect previous line whitespace
+                // if inside pair, add tab
+
+                let y = self.cursor_pos.y;
+                let mut text = String::from('\n');
+                let opening_brackets = ['[', '(', '{', '<'];
+                let closing_brackets = [']', ')', '}', '>'];
+                let left_char = self.rope.char(idx.saturating_sub(1));
+                let c = self.rope.char(idx);
+
+                if opening_brackets.contains(&left_char) && closing_brackets.contains(&c) {
+                    // get whitespace of current line
+                    let curr_line = self.rope.line(y);
+                    let whitespace: String = curr_line
+                        .chars()
+                        .take_while(|c| c.is_whitespace() && *c != '\n' && *c != '\r')
+                        .collect();
+                    // add tab & new line
+                    text.push_str(&whitespace);
+                    text.push_str("    \n");
+                    // add whitespace again
+                    text.push_str(&whitespace);
+                    // move the cursor forwards whitepace + '\n'
+                    self.rope.insert(idx, &text);
+                    self.last_insertion += "\n";
+                    let cursor_target_idx = idx + whitespace.len() + 5;
+                    self.update_cursor_from_char_idx(cursor_target_idx);
+                } else if opening_brackets.contains(&left_char) {
+                    // get whitespace of current line
+                    let curr_line = self.rope.line(y);
+                    let whitespace: String = curr_line
+                        .chars()
+                        .take_while(|c| c.is_whitespace() && *c != '\n' && *c != '\r')
+                        .collect();
+                    // add tab & new line
+                    text.push_str(&whitespace);
+                    text.push_str("    ");
+                    self.rope.insert(idx, &text);
+                    self.last_insertion += "\n";
+                    let cursor_target_idx = idx + whitespace.len() + 5;
+                    self.update_cursor_from_char_idx(cursor_target_idx);
+                } else {
+                    // get whitespace of current line
+                    let curr_line = self.rope.line(y);
+                    let whitespace: String = curr_line
+                        .chars()
+                        .take_while(|c| c.is_whitespace() && *c != '\n' && *c != '\r')
+                        .collect();
+                    text.push_str(&whitespace);
+                    text_to_insert = Some(text);
+                    self.cursor_pos.y += 1;
+                    self.cursor_pos.x = whitespace.len();
+                }
             }
             _ => {}
         }
@@ -1783,7 +1852,7 @@ fn prev_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> Option<u
     None
 }
 
-fn inside_delimiter(
+fn inside_brackets(
     char_idx: usize,
     rope: &Rope,
     opening: char,
@@ -1792,7 +1861,7 @@ fn inside_delimiter(
     let mut line_limit = 100;
     match opening {
         '{' => {
-            line_limit = 500;
+            line_limit = 1000;
         }
         _ => {}
     }
