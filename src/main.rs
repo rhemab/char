@@ -71,7 +71,7 @@ enum Mode {
     Normal,
     Insert,
     Visual,
-    // VisualLine,
+    VisualLine(usize),
     // VisualBlock,
     Command,
     Search,
@@ -152,13 +152,23 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        let mut highlight_text = false;
         if self.highlight_yank {
             self.redraw = true;
+            highlight_text = true;
         }
         match self.mode {
-            Mode::Command | Mode::Search => {
+            Mode::Command => {
                 self.cursor_pos.y = self.main_height + 2;
                 self.cursor_pos.x = self.command_bar.len();
+            }
+            Mode::Search => {
+                self.cursor_pos.y = self.main_height + 2;
+                self.cursor_pos.x = self.command_bar.len();
+                highlight_text = true;
+            }
+            Mode::Visual | Mode::VisualLine(_) => {
+                highlight_text = true;
             }
             _ => {}
         }
@@ -185,10 +195,9 @@ impl App {
                 let line_start_char = self.rope.line_to_char(line_num);
                 let line_end_char = line_start_char + line_length;
 
-                let line_in_selection =
-                    (self.mode == Mode::Visual || self.mode == Mode::Search || self.highlight_yank)
-                        && line_end_char > start_select_rng
-                        && line_start_char <= end_select_rng;
+                let line_in_selection = highlight_text
+                    && line_end_char > start_select_rng
+                    && line_start_char <= end_select_rng;
 
                 if line_in_selection {
                     let mut line_of_spans = vec![];
@@ -472,7 +481,7 @@ impl App {
         let mut should_update_preferred_x = false;
         let mut should_move_cursor = true;
         let mut should_save_command = false;
-        let char_idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
+        let char_idx = self.get_char_idx();
         let mut range = (char_idx, char_idx);
         let mut cursor_target_idx = char_idx;
         let mut count = 1;
@@ -503,6 +512,13 @@ impl App {
                 self.selection.ancor = char_idx;
                 self.selection.cursor = char_idx;
                 self.change_mode(Mode::Visual);
+                return;
+            }
+            (Some(Motion::VisualLineMode), _, _) => {
+                let y = self.cursor_pos.y;
+                self.selection.ancor = self.rope.line_to_char(y);
+                self.selection.cursor = line_end_idx(char_idx, &self.rope);
+                self.change_mode(Mode::VisualLine(y));
                 return;
             }
             (Some(Motion::InsertMode), _, _) => {
@@ -970,7 +986,7 @@ impl App {
             (Some(Motion::Repeat), _, _) => {
                 self.execute_command(self.last_command.clone(), visual_mode, true);
                 if self.mode == Mode::Insert {
-                    let idx = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
+                    let idx = self.get_char_idx();
                     self.rope.insert(idx, &self.last_insertion);
                     self.update_cursor_from_char_idx(idx + self.last_insertion.len() - 1);
                     self.ensure_valid_normal_pos();
@@ -1096,7 +1112,24 @@ impl App {
         if should_move_cursor {
             self.update_cursor_from_char_idx(cursor_target_idx);
             self.ensure_valid_normal_pos();
-            self.selection.cursor = self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x;
+            let char_idx = self.get_char_idx();
+            match self.mode {
+                Mode::VisualLine(y) => {
+                    // cursor is after ancor, ancor is at start of line
+                    // else ancor is at end of line
+                    if char_idx >= self.selection.ancor {
+                        self.selection.ancor = self.rope.line_to_char(y);
+                        self.selection.cursor = line_end_idx(char_idx, &self.rope);
+                    } else {
+                        self.selection.ancor = line_end_idx(self.rope.line_to_char(y), &self.rope);
+                        let curr_line = self.rope.char_to_line(char_idx);
+                        self.selection.cursor = self.rope.line_to_char(curr_line);
+                    }
+                }
+                _ => {
+                    self.selection.cursor = char_idx;
+                }
+            }
         }
 
         if should_update_preferred_x {
@@ -1108,9 +1141,7 @@ impl App {
 
     fn insert_text(&mut self, e: KeyEvent) {
         let mut text_to_insert = None;
-        let y = self.rope.line_to_char(self.cursor_pos.y);
-        let x = self.cursor_pos.x;
-        let idx = x + y;
+        let idx = self.get_char_idx();
         match e.code {
             KeyCode::Char(c) => {
                 let pairs = [
@@ -1289,6 +1320,10 @@ impl App {
                 self.command_bar.clear();
                 self.command_bar.push_str("-- VISUAL --");
             }
+            Mode::VisualLine(_) => {
+                self.command_bar.clear();
+                self.command_bar.push_str("-- VISUAL LINE --");
+            }
             _ => {}
         }
 
@@ -1329,6 +1364,10 @@ impl App {
 
         self.cursor_pos.y = self.rope.char_to_line(safe_idx);
         self.cursor_pos.x = safe_idx - self.rope.line_to_char(self.cursor_pos.y);
+    }
+
+    fn get_char_idx(&self) -> usize {
+        self.rope.line_to_char(self.cursor_pos.y) + self.cursor_pos.x
     }
 }
 
