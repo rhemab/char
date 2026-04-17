@@ -321,24 +321,6 @@ impl Parser {
                             cmd.motion = Some(Motion::UpperEnd);
                             return Some(cmd.clone());
                         }
-                        (Some(Action::Delete), _, Motion::Down) => {
-                            cmd.motion = Some(Motion::DeleteLine);
-                            cmd.count.clear();
-                            cmd.count.push('2');
-                            return Some(cmd.clone());
-                        }
-                        (Some(Action::Change), _, Motion::Down) => {
-                            cmd.motion = Some(Motion::ChangeLine);
-                            cmd.count.clear();
-                            cmd.count.push('2');
-                            return Some(cmd.clone());
-                        }
-                        (Some(Action::Yank), _, Motion::Down) => {
-                            cmd.motion = Some(Motion::YankLine);
-                            cmd.count.clear();
-                            cmd.count.push('2');
-                            return Some(cmd.clone());
-                        }
                         (Some(_action), Some(_modifier), Motion::Back) => {
                             cmd.motion = Some(Motion::OpenParen);
                             return Some(cmd.clone());

@@ -609,6 +609,18 @@ impl App {
                 range = (char_idx, cursor_up_idx(&self.cursor_pos, count, &self.rope));
                 cursor_target_idx = range.1;
             }
+            (Some(Motion::Down), Some(action), _) => match action {
+                Action::Change => {
+                    let start = self.rope.line_to_char(self.cursor_pos.y);
+                    let end = self.rope.line_to_char(self.cursor_pos.y + count);
+                    range = (start, end);
+                }
+                _ => {
+                    let start = self.rope.line_to_char(self.cursor_pos.y);
+                    let end = self.rope.line_to_char(self.cursor_pos.y + count + 1);
+                    range = (start, end);
+                }
+            },
             (Some(Motion::Down), None, _) => {
                 self.cursor_pos.x = self.cursor_pos.preferred_x;
                 range = (
@@ -1071,7 +1083,7 @@ impl App {
         // check for yank
         match command.action {
             Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
-                // yank slice to buffer
+                // yank slice
                 if let Some(slice) = self.rope.get_slice(range.0..range.1) {
                     let mut yank_lines = false;
                     let mut count = 0;
