@@ -1076,8 +1076,13 @@ impl App {
         if visual_mode {
             should_save_command = false;
             let start_select_rng = self.selection.ancor.min(self.selection.cursor);
-            let end_select_rng = self.selection.ancor.max(self.selection.cursor);
-            range = (start_select_rng, end_select_rng + 1);
+            let mut end_select_rng = self.selection.ancor.max(self.selection.cursor);
+            match command.action {
+                Some(Action::Delete) => end_select_rng += 1,
+                Some(Action::Yank) => end_select_rng += 1,
+                _ => {}
+            }
+            range = (start_select_rng, end_select_rng);
         }
 
         // check for yank
@@ -1118,8 +1123,6 @@ impl App {
                 self.cursor_pos.preferred_y = self.cursor_pos.y;
             }
             Some(Action::Delete) | Some(Action::Change) => {
-                eprintln!("visual mode: {}", visual_mode);
-                eprintln!("range: {:?}", range);
                 // delete range
                 self.rope.remove(range.0..range.1);
                 self.cursor_pos.preferred_x = self.cursor_pos.x;
