@@ -464,7 +464,11 @@ impl App {
             }
             Mode::Insert => self.insert_text(key_event),
             _ => {
-                let visual_mode = self.mode == Mode::Visual;
+                let visual_mode = match self.mode {
+                    Mode::Visual => true,
+                    Mode::VisualLine(_) => true,
+                    _ => false,
+                };
                 if let Some(command) = self.parser.generate_command(key_event, visual_mode) {
                     self.execute_command(command, visual_mode, false);
                 }
@@ -1037,6 +1041,33 @@ impl App {
             _ => {}
         }
 
+        // update selection range
+        match self.mode {
+            Mode::VisualLine(y) => {
+                // if cursor is after ancor, ancor is at start of line
+                // else ancor is at end of line
+                if cursor_target_idx >= self.selection.ancor {
+                    self.selection.ancor = self.rope.line_to_char(y);
+                    self.selection.cursor = line_end_idx(cursor_target_idx, &self.rope);
+                } else {
+                    self.selection.ancor = line_end_idx(self.rope.line_to_char(y), &self.rope);
+                    let curr_line = self.rope.char_to_line(cursor_target_idx);
+                    self.selection.cursor = self.rope.line_to_char(curr_line);
+                }
+            }
+            _ => {
+                self.selection.cursor = cursor_target_idx;
+            }
+        }
+
+        // update range
+        if visual_mode {
+            should_save_command = false;
+            let start_select_rng = self.selection.ancor.min(self.selection.cursor);
+            let end_select_rng = self.selection.ancor.max(self.selection.cursor);
+            range = (start_select_rng, end_select_rng + 1);
+        }
+
         // check for yank
         match command.action {
             Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
@@ -1062,8 +1093,6 @@ impl App {
                         .entry('"')
                         .and_modify(|content| *content = new_content.clone())
                         .or_insert(new_content);
-                    self.selection.cursor = range.0;
-                    self.selection.ancor = range.1.saturating_sub(1);
                 }
             }
             _ => {}
@@ -1075,15 +1104,10 @@ impl App {
                 self.highlight_yank = true;
                 self.cursor_pos.preferred_x = self.cursor_pos.x;
                 self.cursor_pos.preferred_y = self.cursor_pos.y;
-                return;
             }
             Some(Action::Delete) | Some(Action::Change) => {
-                should_save_command = true;
-                if visual_mode {
-                    let start_select_rng = self.selection.ancor.min(self.selection.cursor);
-                    let end_select_rng = self.selection.ancor.max(self.selection.cursor);
-                    range = (start_select_rng, end_select_rng + 1);
-                }
+                eprintln!("visual mode: {}", visual_mode);
+                eprintln!("range: {:?}", range);
                 // delete range
                 self.rope.remove(range.0..range.1);
                 self.cursor_pos.preferred_x = self.cursor_pos.x;
@@ -1112,24 +1136,6 @@ impl App {
         if should_move_cursor {
             self.update_cursor_from_char_idx(cursor_target_idx);
             self.ensure_valid_normal_pos();
-            let char_idx = self.get_char_idx();
-            match self.mode {
-                Mode::VisualLine(y) => {
-                    // cursor is after ancor, ancor is at start of line
-                    // else ancor is at end of line
-                    if char_idx >= self.selection.ancor {
-                        self.selection.ancor = self.rope.line_to_char(y);
-                        self.selection.cursor = line_end_idx(char_idx, &self.rope);
-                    } else {
-                        self.selection.ancor = line_end_idx(self.rope.line_to_char(y), &self.rope);
-                        let curr_line = self.rope.char_to_line(char_idx);
-                        self.selection.cursor = self.rope.line_to_char(curr_line);
-                    }
-                }
-                _ => {
-                    self.selection.cursor = char_idx;
-                }
-            }
         }
 
         if should_update_preferred_x {
