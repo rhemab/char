@@ -29,6 +29,7 @@ pub enum Motion {
     InsertMode,
     VisualMode,
     VisualLineMode,
+    VisualBlockMode,
     UpperInsert,
     Append,
     UpperAppend,
@@ -552,12 +553,16 @@ fn generate_trie() -> TrieNode {
         Motion::UpperAppend,
     );
     trie.insert(
-        &[KeyEvent::new(KeyCode::Char('v'), KeyModifiers::empty())],
+        &[KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)],
         Motion::VisualMode,
     );
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('V'), KeyModifiers::empty())],
         Motion::VisualLineMode,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)],
+        Motion::VisualBlockMode,
     );
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)],

@@ -28,6 +28,7 @@ fn main() -> color_eyre::Result<()> {
 
 #[derive(Default)]
 pub struct App {
+    lines_in_view: [usize; 2],
     last_command: commands::Command,
     last_insertion: String,
     redraw: bool,
@@ -40,7 +41,7 @@ pub struct App {
     rope: Rope,
     command_bar: String,
     path: String,
-    selection: VisualSelection,
+    selections: Vec<VisualSelection>,
     yank_buffer: HashMap<char, YankBuffer>,
     highlight_yank: bool,
     query: String,
@@ -52,7 +53,7 @@ enum YankBuffer {
     Lines(String),
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, PartialEq)]
 struct VisualSelection {
     ancor: usize,
     cursor: usize,
@@ -72,7 +73,7 @@ enum Mode {
     Insert,
     Visual,
     VisualLine(usize),
-    // VisualBlock,
+    VisualBlock,
     Command,
     Search,
     Exit,
@@ -167,7 +168,7 @@ impl App {
                 self.cursor_pos.x = self.command_bar.len();
                 highlight_text = true;
             }
-            Mode::Visual | Mode::VisualLine(_) => {
+            Mode::Visual | Mode::VisualLine(_) | Mode::VisualBlock => {
                 highlight_text = true;
             }
             _ => {}
@@ -182,9 +183,7 @@ impl App {
 
         let start_line_idx = self.top_line;
         let end_line_idx = (start_line_idx + height).min(self.rope.len_lines());
-
-        let start_select_rng = self.selection.ancor.min(self.selection.cursor);
-        let end_select_rng = self.selection.ancor.max(self.selection.cursor);
+        self.lines_in_view = [start_line_idx, end_line_idx];
 
         // convert rope slice to ratatui line
         let mut lines = Vec::new();
@@ -195,11 +194,17 @@ impl App {
                 let line_start_char = self.rope.line_to_char(line_num);
                 let line_end_char = line_start_char + line_length;
 
-                let line_in_selection = highlight_text
-                    && line_end_char > start_select_rng
-                    && line_start_char <= end_select_rng;
-
-                if line_in_selection {
+                let mut current_selections = vec![];
+                if highlight_text {
+                    for sel in &self.selections {
+                        let start = sel.ancor.min(sel.cursor);
+                        let end = sel.ancor.max(sel.cursor);
+                        if highlight_text && line_end_char > start && line_start_char <= end {
+                            current_selections.push([start, end]);
+                        }
+                    }
+                }
+                if !current_selections.is_empty() {
                     let mut line_of_spans = vec![];
                     let mut char_buffer = String::new();
                     let mut highlighting = false;
@@ -209,8 +214,13 @@ impl App {
                             continue;
                         }
                         let abs_idx = line_start_char + char_idx;
-                        let in_select_rng =
-                            abs_idx >= start_select_rng && abs_idx <= end_select_rng;
+                        let mut in_select_rng = false;
+                        for rng in &current_selections {
+                            if abs_idx >= rng[0] && abs_idx <= rng[1] {
+                                in_select_rng = true;
+                                break;
+                            }
+                        }
                         if in_select_rng {
                             if !highlighting && !char_buffer.is_empty() {
                                 line_of_spans.push(Span::raw(char_buffer.clone()));
@@ -394,7 +404,7 @@ impl App {
                             let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
                                 + self.cursor_pos.preferred_x;
                             if let Some(idx) =
-                                next_search_result_idx(char_idx, &self.query, &self.rope)
+                                next_search_result_idx(char_idx, &self.query, &self.rope, None)
                             {
                                 let cursor_target_idx = idx;
                                 self.update_cursor_from_char_idx(cursor_target_idx);
@@ -417,7 +427,7 @@ impl App {
                             let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
                                 + self.cursor_pos.preferred_x;
                             while let Some(idx) =
-                                next_search_result_idx(char_idx, &self.query, &self.rope)
+                                next_search_result_idx(char_idx, &self.query, &self.rope, None)
                             {
                                 // replace text
                                 self.rope.remove(idx..idx + self.query.len());
@@ -441,25 +451,56 @@ impl App {
                     _ => {}
                 }
 
+                let mut highlight_all = false;
                 if self.command_bar.starts_with(":%s/") {
                     self.mode = Mode::Search;
+                    highlight_all = true;
                 }
                 if self.mode == Mode::Search {
+                    self.selections.clear();
                     self.query = extract_query(&self.command_bar);
                     if self.query.is_empty() {
-                        self.selection.ancor = usize::MAX;
-                        self.selection.cursor = usize::MAX;
                         self.scroll(self.cursor_pos.preferred_y);
                         return;
                     }
-                    let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
-                        + self.cursor_pos.preferred_x;
-                    if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope) {
-                        self.selection.ancor = idx;
-                        self.selection.cursor = idx + self.query.len() - 1;
-                        let target_y = self.rope.char_to_line(idx);
-                        self.scroll(target_y);
+                    if highlight_all {
+                        let mut idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
+                            + self.cursor_pos.preferred_x;
+                        while let Some(i) = next_search_result_idx(
+                            idx,
+                            &self.query,
+                            &self.rope,
+                            Some(self.lines_in_view),
+                        ) {
+                            eprintln!("line: {}", self.rope.char_to_line(i));
+                            idx = i;
+                            let sel = VisualSelection {
+                                ancor: idx,
+                                cursor: idx + self.query.len() - 1,
+                            };
+                            if self.selections.contains(&sel) {
+                                let target_y = self.rope.char_to_line(idx);
+                                self.scroll(target_y);
+                                break;
+                            }
+                            self.selections.push(sel);
+                        }
+                    } else {
+                        let char_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
+                            + self.cursor_pos.preferred_x;
+                        if let Some(idx) =
+                            next_search_result_idx(char_idx, &self.query, &self.rope, None)
+                        {
+                            let sel = VisualSelection {
+                                ancor: idx,
+                                cursor: idx + self.query.len() - 1,
+                            };
+                            self.selections.push(sel);
+                            let target_y = self.rope.char_to_line(idx);
+                            self.scroll(target_y);
+                        }
                     }
+                    eprintln!("found: {}", self.selections.len());
                 }
             }
             Mode::Insert => self.insert_text(key_event),
@@ -467,6 +508,7 @@ impl App {
                 let visual_mode = match self.mode {
                     Mode::Visual => true,
                     Mode::VisualLine(_) => true,
+                    Mode::VisualBlock => true,
                     _ => false,
                 };
                 if let Some(command) = self.parser.generate_command(key_event, visual_mode) {
@@ -513,16 +555,29 @@ impl App {
                 should_update_preferred_x = true;
             }
             (Some(Motion::VisualMode), _, _) => {
-                self.selection.ancor = char_idx;
-                self.selection.cursor = char_idx;
+                self.selections.clear();
                 self.change_mode(Mode::Visual);
                 return;
             }
             (Some(Motion::VisualLineMode), _, _) => {
                 let y = self.cursor_pos.y;
-                self.selection.ancor = self.rope.line_to_char(y);
-                self.selection.cursor = line_end_idx(char_idx, &self.rope);
+                let new_selection = VisualSelection {
+                    ancor: self.rope.line_to_char(y),
+                    cursor: line_end_idx(char_idx, &self.rope),
+                };
+                self.selections.clear();
+                self.selections.push(new_selection);
                 self.change_mode(Mode::VisualLine(y));
+                return;
+            }
+            (Some(Motion::VisualBlockMode), _, _) => {
+                let new_selection = VisualSelection {
+                    ancor: char_idx,
+                    cursor: char_idx,
+                };
+                self.selections.clear();
+                self.selections.push(new_selection);
+                self.change_mode(Mode::VisualBlock);
                 return;
             }
             (Some(Motion::InsertMode), _, _) => {
@@ -984,7 +1039,7 @@ impl App {
                 }
             }
             (Some(Motion::NextSearchResult), _, _) => {
-                if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope) {
+                if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope, None) {
                     cursor_target_idx = idx;
                     should_update_preferred_x = true;
                 } else {
@@ -1017,7 +1072,7 @@ impl App {
                 self.command_bar.clear();
                 self.command_bar.push('/');
                 self.command_bar.push_str(&self.query);
-                if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope) {
+                if let Some(idx) = next_search_result_idx(char_idx, &self.query, &self.rope, None) {
                     cursor_target_idx = idx;
                     should_update_preferred_x = true;
                 } else {
@@ -1058,31 +1113,37 @@ impl App {
             Mode::VisualLine(y) => {
                 // if cursor is after ancor, ancor is at start of line
                 // else ancor is at end of line
-                if cursor_target_idx >= self.selection.ancor {
-                    self.selection.ancor = self.rope.line_to_char(y);
-                    self.selection.cursor = line_end_idx(cursor_target_idx, &self.rope);
-                } else {
-                    self.selection.ancor = line_end_idx(self.rope.line_to_char(y), &self.rope);
-                    let curr_line = self.rope.char_to_line(cursor_target_idx);
-                    self.selection.cursor = self.rope.line_to_char(curr_line);
+                if let Some(sel) = self.selections.first_mut() {
+                    if cursor_target_idx >= sel.ancor {
+                        sel.ancor = self.rope.line_to_char(y);
+                        sel.cursor = line_end_idx(cursor_target_idx, &self.rope);
+                    } else {
+                        sel.ancor = line_end_idx(self.rope.line_to_char(y), &self.rope);
+                        let curr_line = self.rope.char_to_line(cursor_target_idx);
+                        sel.cursor = self.rope.line_to_char(curr_line);
+                    }
                 }
             }
             _ => {
-                self.selection.cursor = cursor_target_idx;
+                if let Some(sel) = self.selections.first_mut() {
+                    sel.cursor = cursor_target_idx;
+                }
             }
         }
 
         // update range
         if visual_mode {
             should_save_command = false;
-            let start_select_rng = self.selection.ancor.min(self.selection.cursor);
-            let mut end_select_rng = self.selection.ancor.max(self.selection.cursor);
-            match command.action {
-                Some(Action::Delete) => end_select_rng += 1,
-                Some(Action::Yank) => end_select_rng += 1,
-                _ => {}
+            if let Some(sel) = self.selections.first_mut() {
+                let start_select_rng = sel.ancor.min(sel.cursor);
+                let mut end_select_rng = sel.ancor.max(sel.cursor);
+                match command.action {
+                    Some(Action::Delete) => end_select_rng += 1,
+                    Some(Action::Yank) => end_select_rng += 1,
+                    _ => {}
+                }
+                range = (start_select_rng, end_select_rng);
             }
-            range = (start_select_rng, end_select_rng);
         }
 
         // check for yank
@@ -1324,8 +1385,7 @@ impl App {
                 }
             }
             Mode::Search => {
-                self.selection.ancor = usize::MAX;
-                self.selection.cursor = usize::MAX;
+                self.selections.clear();
                 self.command_bar.clear();
                 self.command_bar.push_str("/");
             }
@@ -1344,6 +1404,10 @@ impl App {
             Mode::VisualLine(_) => {
                 self.command_bar.clear();
                 self.command_bar.push_str("-- VISUAL LINE --");
+            }
+            Mode::VisualBlock => {
+                self.command_bar.clear();
+                self.command_bar.push_str("-- VISUAL BLOCK --");
             }
             _ => {}
         }
@@ -1845,36 +1909,57 @@ fn new_line_above_idx(cursor_pos: &CursorPos, rope: &Rope) -> (usize, String) {
     (line_start_char, whitespace)
 }
 
-fn next_search_result_idx(char_idx: usize, query: &str, rope: &Rope) -> Option<usize> {
+fn next_search_result_idx(
+    char_idx: usize,
+    query: &str,
+    rope: &Rope,
+    line_rng: Option<[usize; 2]>,
+) -> Option<usize> {
     // search to the end of the line
     let start_line_idx = rope.char_to_line(char_idx);
     let mut line_idx = start_line_idx;
-    let current_line = rope.line(line_idx);
-    let start = char_idx + 1;
-    let end = char_idx + current_line.len_chars();
-    if let Some(idx) = rope.slice(start..end).to_string().find(query) {
-        return Some(start + idx);
-    }
-
-    // search line by line
-    let total_lines = rope.len_lines();
-    line_idx += 1;
-    while line_idx < total_lines {
-        let text = rope.line(line_idx).to_string();
-        if let Some(idx) = text.find(query) {
-            return Some(rope.line_to_char(line_idx) + idx);
+    if let Some(current_line) = rope.get_line(line_idx) {
+        let mut start = char_idx + 1;
+        let mut end = char_idx + current_line.len_chars();
+        if let Some(slice) = rope.get_slice(start..end) {
+            if let Some(idx) = slice.to_string().find(query) {
+                return Some(start + idx);
+            }
         }
-        line_idx += 1;
-    }
 
-    // search from the top to the cursor
-    line_idx = 0;
-    while line_idx <= start_line_idx {
-        let text = rope.line(line_idx).to_string();
-        if let Some(idx) = text.find(query) {
-            return Some(rope.line_to_char(line_idx) + idx);
+        if let Some(rng) = line_rng {
+            start = rng[0];
+            end = rng[1];
+        } else {
+            start = 0;
+            end = rope.len_lines().saturating_sub(1);
         }
+
+        // search line by line from cursor
         line_idx += 1;
+        while line_idx < end {
+            if let Some(text) = rope.get_line(line_idx) {
+                if let Some(idx) = text.to_string().find(query) {
+                    return Some(rope.line_to_char(line_idx) + idx);
+                }
+                line_idx += 1;
+            } else {
+                break;
+            }
+        }
+
+        // search from the top to the cursor
+        line_idx = start;
+        while line_idx <= start_line_idx {
+            if let Some(text) = rope.get_line(line_idx) {
+                if let Some(idx) = text.to_string().find(query) {
+                    return Some(rope.line_to_char(line_idx) + idx);
+                }
+                line_idx += 1;
+            } else {
+                break;
+            }
+        }
     }
 
     None
