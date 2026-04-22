@@ -52,6 +52,7 @@ pub struct App {
 enum YankBuffer {
     Chars(String),
     Lines(String),
+    Block(Vec<String>),
 }
 
 #[derive(Default, Debug)]
@@ -1050,6 +1051,20 @@ impl App {
                             self.rope.insert(idx, &content);
                             cursor_target_idx = idx;
                         }
+                        YankBuffer::Block(strings) => {
+                            let mut y = self.cursor_pos.y;
+                            let x = self.cursor_pos.x;
+                            for s in strings {
+                                let mut insert_idx = self.rope.line_to_char(y) + x;
+                                // if on empty line, insert before cursor
+                                if self.rope.char(insert_idx) != '\n' {
+                                    insert_idx += 1;
+                                }
+                                self.rope.insert(insert_idx, &s);
+                                cursor_target_idx = char_idx + s.len();
+                                y += 1;
+                            }
+                        }
                     }
                 }
             }
@@ -1067,6 +1082,16 @@ impl App {
                             let idx = self.rope.line_to_char(self.cursor_pos.y);
                             self.rope.insert(idx, &content);
                             cursor_target_idx = idx;
+                        }
+                        YankBuffer::Block(strings) => {
+                            let mut y = self.cursor_pos.y;
+                            let x = self.cursor_pos.x;
+                            for s in strings {
+                                let mut insert_idx = self.rope.line_to_char(y) + x;
+                                self.rope.insert(insert_idx, &s);
+                                cursor_target_idx = char_idx + s.len();
+                                y += 1;
+                            }
                         }
                     }
                 }
@@ -1165,7 +1190,7 @@ impl App {
             _ => {}
         }
 
-        // update range
+        // update char range
         if visual_mode {
             should_save_command = false;
             if let Some(sel) = self.selections.first_mut() {
@@ -1183,8 +1208,29 @@ impl App {
         // check for yank
         match command.action {
             Some(Action::Yank) | Some(Action::Delete) | Some(Action::Change) => {
-                // yank slice
-                if let Some(slice) = self.rope.get_slice(range.0..range.1) {
+                if self.mode == Mode::VisualBlock {
+                    if let Some(rng) = &self.visual_block_rng {
+                        let mut x_rng = rng.x_rng.clone();
+                        x_rng.sort();
+                        let mut y_rng = rng.y_rng.clone();
+                        y_rng.sort();
+
+                        let mut slices = vec![];
+                        for y in y_rng[0]..y_rng[1] {
+                            let line_char = self.rope.line_to_char(y);
+                            let start = line_char + x_rng[0];
+                            let end = line_char + x_rng[1];
+                            if let Some(slice) = self.rope.get_slice(start..=end) {
+                                slices.push(slice.to_string());
+                            }
+                        }
+                        let buf = YankBuffer::Block(slices);
+                        self.yank_buffer
+                            .entry('"')
+                            .and_modify(|content| *content = buf.clone())
+                            .or_insert(buf);
+                    }
+                } else if let Some(slice) = self.rope.get_slice(range.0..range.1) {
                     let mut yank_lines = false;
                     let mut count = 0;
                     for c in slice.chars() {
