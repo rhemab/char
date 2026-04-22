@@ -45,12 +45,19 @@ pub struct App {
     yank_buffer: HashMap<char, YankBuffer>,
     highlight_yank: bool,
     query: String,
+    visual_block_rng: Option<VisualBlockRng>,
 }
 
 #[derive(Clone)]
 enum YankBuffer {
     Chars(String),
     Lines(String),
+}
+
+#[derive(Default, Debug)]
+struct VisualBlockRng {
+    x_rng: [usize; 2],
+    y_rng: [usize; 2],
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -153,6 +160,7 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        let mut visual_block_rng = None;
         let mut highlight_text = false;
         if self.highlight_yank {
             self.redraw = true;
@@ -168,8 +176,20 @@ impl App {
                 self.cursor_pos.x = self.command_bar.len();
                 highlight_text = true;
             }
-            Mode::Visual | Mode::VisualLine(_) | Mode::VisualBlock => {
+            Mode::Visual | Mode::VisualLine(_) => {
                 highlight_text = true;
+            }
+            Mode::VisualBlock => {
+                highlight_text = true;
+                if let Some(rng) = &mut self.visual_block_rng {
+                    rng.x_rng[1] = self.cursor_pos.x;
+                    rng.y_rng[1] = self.cursor_pos.y;
+                    let mut y_rng = rng.y_rng.clone();
+                    let mut x_rng = rng.x_rng.clone();
+                    y_rng.sort();
+                    x_rng.sort();
+                    visual_block_rng = Some(VisualBlockRng { x_rng, y_rng });
+                }
             }
             _ => {}
         }
@@ -204,15 +224,11 @@ impl App {
                         }
                     }
                 }
-                if !current_selections.is_empty() {
+                if !current_selections.is_empty() || visual_block_rng.is_some() {
                     let mut line_of_spans = vec![];
                     let mut char_buffer = String::new();
                     let mut highlighting = false;
                     for (char_idx, c) in rope_line.chars().enumerate() {
-                        if line_length == 1 && c == '\n' {
-                            line_of_spans.push(Span::raw(" ").fg(Color::White).bg(Color::DarkGray));
-                            continue;
-                        }
                         let abs_idx = line_start_char + char_idx;
                         let mut in_select_rng = false;
                         for rng in &current_selections {
@@ -221,7 +237,21 @@ impl App {
                                 break;
                             }
                         }
+                        if !in_select_rng {
+                            if let Some(rng) = &visual_block_rng {
+                                let y_rng = rng.y_rng[0]..=rng.y_rng[1];
+                                let x_rng = rng.x_rng[0]..=rng.x_rng[1];
+                                if y_rng.contains(&line_num) && x_rng.contains(&char_idx) {
+                                    in_select_rng = true;
+                                }
+                            }
+                        }
                         if in_select_rng {
+                            if line_length == 1 && c == '\n' {
+                                line_of_spans
+                                    .push(Span::raw(" ").fg(Color::White).bg(Color::DarkGray));
+                                continue;
+                            }
                             if !highlighting && !char_buffer.is_empty() {
                                 line_of_spans.push(Span::raw(char_buffer.clone()));
                                 char_buffer.clear();
@@ -472,7 +502,6 @@ impl App {
                             &self.rope,
                             Some(self.lines_in_view),
                         ) {
-                            eprintln!("line: {}", self.rope.char_to_line(i));
                             idx = i;
                             let sel = VisualSelection {
                                 ancor: idx,
@@ -500,7 +529,6 @@ impl App {
                             self.scroll(target_y);
                         }
                     }
-                    eprintln!("found: {}", self.selections.len());
                 }
             }
             Mode::Insert => self.insert_text(key_event),
@@ -571,12 +599,17 @@ impl App {
                 return;
             }
             (Some(Motion::VisualBlockMode), _, _) => {
-                let new_selection = VisualSelection {
-                    ancor: char_idx,
-                    cursor: char_idx,
-                };
                 self.selections.clear();
-                self.selections.push(new_selection);
+
+                let x = self.cursor_pos.x;
+                let y = self.cursor_pos.y;
+
+                let visual_block_rng = VisualBlockRng {
+                    x_rng: [x, x],
+                    y_rng: [y, y],
+                };
+
+                self.visual_block_rng = Some(visual_block_rng);
                 self.change_mode(Mode::VisualBlock);
                 return;
             }
@@ -1124,11 +1157,12 @@ impl App {
                     }
                 }
             }
-            _ => {
+            Mode::Visual => {
                 if let Some(sel) = self.selections.first_mut() {
                     sel.cursor = cursor_target_idx;
                 }
             }
+            _ => {}
         }
 
         // update range
