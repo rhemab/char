@@ -166,6 +166,7 @@ impl App {
         if self.highlight_yank {
             self.redraw = true;
             highlight_text = true;
+            eprintln!("{:?}", self.selections);
         }
         match self.mode {
             Mode::Command => {
@@ -220,7 +221,7 @@ impl App {
                     for sel in &self.selections {
                         let start = sel.ancor.min(sel.cursor);
                         let end = sel.ancor.max(sel.cursor);
-                        if highlight_text && line_end_char > start && line_start_char <= end {
+                        if line_end_char > start && line_start_char <= end {
                             current_selections.push([start, end]);
                         }
                     }
@@ -584,7 +585,12 @@ impl App {
                 should_update_preferred_x = true;
             }
             (Some(Motion::VisualMode), _, _) => {
+                let new_selection = VisualSelection {
+                    ancor: char_idx,
+                    cursor: char_idx,
+                };
                 self.selections.clear();
+                self.selections.push(new_selection);
                 self.change_mode(Mode::Visual);
                 return;
             }
@@ -1087,7 +1093,7 @@ impl App {
                             let mut y = self.cursor_pos.y;
                             let x = self.cursor_pos.x;
                             for s in strings {
-                                let mut insert_idx = self.rope.line_to_char(y) + x;
+                                let insert_idx = self.rope.line_to_char(y) + x;
                                 self.rope.insert(insert_idx, &s);
                                 cursor_target_idx = char_idx + s.len();
                                 y += 1;
@@ -1216,7 +1222,7 @@ impl App {
                         y_rng.sort();
 
                         let mut slices = vec![];
-                        for y in y_rng[0]..y_rng[1] {
+                        for y in y_rng[0]..=y_rng[1] {
                             let line_char = self.rope.line_to_char(y);
                             let start = line_char + x_rng[0];
                             let end = line_char + x_rng[1];
@@ -1225,10 +1231,7 @@ impl App {
                             }
                         }
                         let buf = YankBuffer::Block(slices);
-                        self.yank_buffer
-                            .entry('"')
-                            .and_modify(|content| *content = buf.clone())
-                            .or_insert(buf);
+                        self.yank_buffer.insert('"', buf);
                     }
                 } else if let Some(slice) = self.rope.get_slice(range.0..range.1) {
                     let mut yank_lines = false;
@@ -1247,10 +1250,7 @@ impl App {
                     } else {
                         YankBuffer::Chars(String::from(slice))
                     };
-                    self.yank_buffer
-                        .entry('"')
-                        .and_modify(|content| *content = new_content.clone())
-                        .or_insert(new_content);
+                    self.yank_buffer.insert('"', new_content);
                 }
             }
             _ => {}
@@ -1259,9 +1259,12 @@ impl App {
         // check for action
         match command.action {
             Some(Action::Yank) => {
-                self.highlight_yank = true;
+                if !visual_mode {
+                    self.highlight_yank = true;
+                }
                 self.cursor_pos.preferred_x = self.cursor_pos.x;
                 self.cursor_pos.preferred_y = self.cursor_pos.y;
+                self.change_mode(Mode::Normal);
             }
             Some(Action::Delete) | Some(Action::Change) => {
                 // delete range
