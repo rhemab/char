@@ -1193,7 +1193,14 @@ impl App {
                     sel.cursor = cursor_target_idx;
                 }
             }
-            _ => {}
+            _ => {
+                let new_sel = VisualSelection {
+                    ancor: range.0,
+                    cursor: range.1.saturating_sub(1),
+                };
+                self.selections.clear();
+                self.selections.push(new_sel);
+            }
         }
 
         // update char range
