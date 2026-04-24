@@ -1245,12 +1245,8 @@ impl App {
                     }
                 } else if let Some(slice) = self.rope.get_slice(range.0..range.1) {
                     let mut yank_lines = false;
-                    let mut count = 0;
                     for c in slice.chars() {
                         if c == '\n' {
-                            count += 1;
-                        }
-                        if count > 1 {
                             yank_lines = true;
                             break;
                         }
@@ -1275,6 +1271,7 @@ impl App {
                 self.cursor_pos.preferred_x = self.cursor_pos.x;
                 self.cursor_pos.preferred_y = self.cursor_pos.y;
                 self.change_mode(Mode::Normal);
+                should_move_cursor = false;
             }
             Some(Action::Delete) | Some(Action::Change) => {
                 // delete range
