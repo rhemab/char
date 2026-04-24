@@ -139,7 +139,7 @@ impl App {
         args.next();
         if let Some(path) = args.next() {
             // load file
-            let rope = Rope::from_reader(io::BufReader::new(fs::File::open(&path)?))?;
+            let rope = Rope::from_reader(fs::File::open(&path)?)?;
             self.rope = rope;
             self.path = path;
         }
@@ -428,6 +428,30 @@ impl App {
                             ":q" => {
                                 self.exit();
                                 return;
+                            }
+                            ":w" => {
+                                self.command_bar.clear();
+                                if let Err(err) = self.write_file() {
+                                    eprintln!("write err: {:?}", err);
+                                    self.command_bar.push_str(&format!("failed to write file"));
+                                } else {
+                                    self.command_bar.push_str(&format!(
+                                        "written: \"{}\" {}L, {}",
+                                        &self.path,
+                                        self.rope.len_lines() - 1,
+                                        format_file_size(self.rope.len_bytes()),
+                                    ));
+                                }
+                            }
+                            ":wq" => {
+                                self.command_bar.clear();
+                                if let Err(err) = self.write_file() {
+                                    eprintln!("write err: {:?}", err);
+                                    self.command_bar.push_str(&format!("failed to write file"));
+                                } else {
+                                    self.exit();
+                                    return;
+                                }
                             }
                             _ => {}
                         }
@@ -1467,10 +1491,16 @@ impl App {
         self.mode = Mode::Exit;
     }
 
+    fn write_file(&self) -> io::Result<()> {
+        self.rope
+            .write_to(std::io::BufWriter::new(fs::File::create(&self.path)?))?;
+        Ok(())
+    }
+
     fn change_mode(&mut self, target_mode: Mode) {
         match target_mode {
             Mode::Normal => {
-                if self.mode != Mode::Search {
+                if self.mode != Mode::Search && self.mode != Mode::Command {
                     self.command_bar.clear();
                 }
             }
