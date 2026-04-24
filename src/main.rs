@@ -1193,6 +1193,9 @@ impl App {
                     sel.cursor = cursor_target_idx;
                 }
             }
+            Mode::VisualBlock => {
+                self.selections.clear();
+            }
             _ => {
                 let new_sel = VisualSelection {
                     ancor: range.0,
