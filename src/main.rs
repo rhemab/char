@@ -20,6 +20,18 @@ mod trie;
 const HIGHLIGHT_DURATION: u64 = 150;
 const SCROLL_OFFSET: usize = 10;
 
+const OPENING_BRACKETS: [char; 4] = ['[', '(', '{', '<'];
+const CLOSING_BRACKETS: [char; 4] = [']', ')', '}', '>'];
+const PAIRS: [[char; 2]; 7] = [
+    ['[', ']'],
+    ['{', '}'],
+    ['(', ')'],
+    ['<', '>'],
+    ['"', '"'],
+    ['\'', '\''],
+    ['`', '`'],
+];
+
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
     ratatui::run(|terminal| App::default().run(terminal))?;
@@ -46,6 +58,7 @@ pub struct App {
     highlight_yank: bool,
     query: String,
     visual_block_rng: Option<VisualBlockRng>,
+    matching_bracket_idx: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -217,6 +230,12 @@ impl App {
                 let line_end_char = line_start_char + line_length;
 
                 let mut current_selections = vec![];
+
+                // check for matching bracket
+                if let Some(i) = self.matching_bracket_idx {
+                    current_selections.push([i, i]);
+                }
+
                 if highlight_text {
                     for sel in &self.selections {
                         let start = sel.ancor.min(sel.cursor);
@@ -436,7 +455,7 @@ impl App {
                                     self.command_bar.push_str(&format!("failed to write file"));
                                 } else {
                                     self.command_bar.push_str(&format!(
-                                        "written: \"{}\" {}L, {}",
+                                        "\"{}\" {}L, {} written",
                                         &self.path,
                                         self.rope.len_lines() - 1,
                                         format_file_size(self.rope.len_bytes()),
@@ -1005,11 +1024,10 @@ impl App {
 
                 let y = self.cursor_pos.y;
                 let mut text = String::from('\n');
-                let opening_brackets = ['[', '(', '{', '<'];
                 let last_char_idx = line_end_idx(char_idx, &self.rope);
                 let last_char = self.rope.char(last_char_idx.saturating_sub(1));
 
-                if opening_brackets.contains(&last_char) {
+                if OPENING_BRACKETS.contains(&last_char) {
                     // get whitespace of current line
                     let curr_line = self.rope.line(y);
                     let whitespace: String = curr_line
@@ -1332,6 +1350,9 @@ impl App {
             self.cursor_pos.preferred_x = self.cursor_pos.x;
         }
 
+        // check for matching bracket
+        self.matching_bracket_idx = find_matching_bracket(self.get_char_idx(), &self.rope);
+
         self.scroll(self.cursor_pos.y);
     }
 
@@ -1340,17 +1361,8 @@ impl App {
         let idx = self.get_char_idx();
         match e.code {
             KeyCode::Char(c) => {
-                let pairs = [
-                    ['[', ']'],
-                    ['{', '}'],
-                    ['(', ')'],
-                    ['<', '>'],
-                    ['"', '"'],
-                    ['\'', '\''],
-                    ['`', '`'],
-                ];
                 let mut text = String::from(c);
-                if let Some(pair) = pairs.iter().find(|e| e.contains(&c)) {
+                if let Some(pair) = PAIRS.iter().find(|e| e.contains(&c)) {
                     if pair[0] == c {
                         text.push(pair[1]);
                     } else {
@@ -1406,12 +1418,10 @@ impl App {
 
                 let y = self.cursor_pos.y;
                 let mut text = String::from('\n');
-                let opening_brackets = ['[', '(', '{', '<'];
-                let closing_brackets = [']', ')', '}', '>'];
                 let left_char = self.rope.char(idx.saturating_sub(1));
                 let c = self.rope.char(idx);
 
-                if opening_brackets.contains(&left_char) && closing_brackets.contains(&c) {
+                if OPENING_BRACKETS.contains(&left_char) && CLOSING_BRACKETS.contains(&c) {
                     // get whitespace of current line
                     let curr_line = self.rope.line(y);
                     let whitespace: String = curr_line
@@ -1428,7 +1438,7 @@ impl App {
                     self.last_insertion += "\n";
                     let cursor_target_idx = idx + whitespace.len() + 5;
                     self.update_cursor_from_char_idx(cursor_target_idx);
-                } else if opening_brackets.contains(&left_char) {
+                } else if OPENING_BRACKETS.contains(&left_char) {
                     // get whitespace of current line
                     let curr_line = self.rope.line(y);
                     let whitespace: String = curr_line
@@ -2338,13 +2348,9 @@ fn inside_quotes(x: usize, y: usize, rope: &Rope, quote: char) -> Option<(usize,
 }
 
 fn matching_bracket_idx(cursor_pos: &CursorPos, char_idx: usize, rope: &Rope) -> Option<usize> {
-    let c = rope.char(char_idx);
-    let opening_brackets = ['[', '(', '{', '<'];
-    let closing_brackets = [']', ')', '}', '>'];
-
     // if cursor is on bracket
-    if opening_brackets.contains(&c) || closing_brackets.contains(&c) {
-        return find_matching_bracket(char_idx, rope, c);
+    if let Some(i) = find_matching_bracket(char_idx, rope) {
+        return Some(i);
     }
 
     // if cursor is inside brackets inline
@@ -2359,12 +2365,12 @@ fn matching_bracket_idx(cursor_pos: &CursorPos, char_idx: usize, rope: &Rope) ->
     while idx > 0 {
         idx -= 1;
         let c = line.char(idx);
-        if opening_brackets.contains(&c) {
+        if OPENING_BRACKETS.contains(&c) {
             if count == 0 {
                 return Some(line_char_idx + idx);
             }
             count -= 1;
-        } else if closing_brackets.contains(&c) {
+        } else if CLOSING_BRACKETS.contains(&c) {
             count += 1;
         }
     }
@@ -2374,9 +2380,9 @@ fn matching_bracket_idx(cursor_pos: &CursorPos, char_idx: usize, rope: &Rope) ->
     idx = x + 1;
     while idx < line.len_chars() - 1 {
         let c = line.char(idx);
-        if opening_brackets.contains(&c) {
+        if OPENING_BRACKETS.contains(&c) {
             found_opening = true;
-        } else if closing_brackets.contains(&c) && found_opening {
+        } else if CLOSING_BRACKETS.contains(&c) && found_opening {
             return Some(line_char_idx + idx);
         }
         idx += 1;
@@ -2385,30 +2391,22 @@ fn matching_bracket_idx(cursor_pos: &CursorPos, char_idx: usize, rope: &Rope) ->
     None
 }
 
-fn find_matching_bracket(char_idx: usize, rope: &Rope, token: char) -> Option<usize> {
+/// Takes a char index and a rope and checks the token of the char at the current index.
+/// If the token is a bracket, it returns the matching bracket index, otherwise it returns None.
+fn find_matching_bracket(char_idx: usize, rope: &Rope) -> Option<usize> {
+    let token = rope.char(char_idx);
     let mut idx = char_idx;
     let opening;
     let closing;
-    match token {
-        '[' | ']' => {
-            opening = '[';
-            closing = ']';
-        }
-        '(' | ')' => {
-            opening = '(';
-            closing = ')';
-        }
-        '{' | '}' => {
-            opening = '{';
-            closing = '}';
-        }
-        '<' | '>' => {
-            opening = '<';
-            closing = '>';
-        }
-        _ => {
-            return None;
-        }
+
+    if let Some(i) = OPENING_BRACKETS.into_iter().position(|el| el == token) {
+        opening = OPENING_BRACKETS[i];
+        closing = CLOSING_BRACKETS[i];
+    } else if let Some(i) = CLOSING_BRACKETS.into_iter().position(|el| el == token) {
+        opening = OPENING_BRACKETS[i];
+        closing = CLOSING_BRACKETS[i];
+    } else {
+        return None;
     }
 
     if token == opening {

@@ -266,6 +266,14 @@ impl Parser {
                         cmd.modifier = Some(Modifier::Inside);
                         return None;
                     }
+                } else if visual_mode {
+                    eprintln!("visual mode: {}", visual_mode);
+                    let cmd = Command {
+                        modifier: Some(Modifier::Inside),
+                        ..Default::default()
+                    };
+                    self.command = Some(cmd);
+                    return None;
                 }
             }
             (KeyCode::Char('a'), KeyModifiers::NONE) => {
@@ -274,6 +282,14 @@ impl Parser {
                         cmd.modifier = Some(Modifier::Around);
                         return None;
                     }
+                } else if visual_mode {
+                    eprintln!("visual mode: {}", visual_mode);
+                    let cmd = Command {
+                        modifier: Some(Modifier::Around),
+                        ..Default::default()
+                    };
+                    self.command = Some(cmd);
+                    return None;
                 }
             }
             (KeyCode::Char('t'), KeyModifiers::NONE) => {
@@ -311,25 +327,29 @@ impl Parser {
         self.motion_buffer.push(key_event);
         if let Some(node) = self.trie.search(&self.motion_buffer) {
             if let Some(motion) = node.command {
-                let mut count = String::from("1");
                 if let Some(cmd) = &mut self.command {
                     match (cmd.action, cmd.modifier, motion) {
+                        // change word -> change end
                         (Some(Action::Change), _, Motion::Word) => {
                             cmd.motion = Some(Motion::End);
                             return Some(cmd.clone());
                         }
+                        // change upper word -> change upper end
                         (Some(Action::Change), _, Motion::UpperWord) => {
                             cmd.motion = Some(Motion::UpperEnd);
                             return Some(cmd.clone());
                         }
+                        // cib -> ci(
                         (Some(_action), Some(_modifier), Motion::Back) => {
                             cmd.motion = Some(Motion::OpenParen);
                             return Some(cmd.clone());
                         }
+                        // ciB -> ci{
                         (Some(_action), Some(_modifier), Motion::PrevEmptyLine) => {
                             cmd.motion = Some(Motion::OpenCurlyBrace);
                             return Some(cmd.clone());
                         }
+                        // , -> repeat last find in reverse
                         (_, None, Motion::Comma) => match self.last_find_cmd {
                             Some(Modifier::Find {
                                 c,
@@ -348,6 +368,7 @@ impl Parser {
                                 return None;
                             }
                         },
+                        // ; -> repeat last find
                         (_, None, Motion::Semicolon) => match self.last_find_cmd {
                             Some(Modifier::Find {
                                 c,
@@ -366,78 +387,74 @@ impl Parser {
                                 return None;
                             }
                         },
-                        (None, _, _) => {
-                            // if no action, extract count
-                            count = cmd.count.clone();
-                        }
                         _ => {
                             cmd.motion = Some(motion);
                             return Some(cmd.clone());
                         }
                     }
-                }
-                let mut cmd = Command::default();
-                cmd.count = count;
-                match motion {
-                    Motion::UpperChange => {
-                        cmd.motion = Some(motion);
-                        cmd.action = Some(Action::Change);
-                    }
-                    Motion::UpperDelete => {
-                        cmd.motion = Some(Motion::LineEnd);
-                        cmd.action = Some(Action::Delete);
-                    }
-                    Motion::UpperYank => {
-                        cmd.motion = Some(Motion::LineEnd);
-                        cmd.action = Some(Action::Yank);
-                    }
-                    Motion::DeleteChar => {
-                        cmd.motion = Some(Motion::Right);
-                        cmd.action = Some(Action::Delete);
-                    }
-                    Motion::Comma => match self.last_find_cmd {
-                        Some(Modifier::Find {
-                            c,
-                            forwards,
-                            inclusive,
-                        }) => {
-                            cmd.modifier = Some(Modifier::Find {
-                                c,
-                                forwards: !forwards,
-                                inclusive,
-                            });
+                } else {
+                    let mut cmd = Command::default();
+                    match motion {
+                        Motion::UpperChange => {
+                            cmd.motion = Some(motion);
+                            cmd.action = Some(Action::Change);
                         }
-                        _ => {
-                            self.reset();
-                            return None;
+                        Motion::UpperDelete => {
+                            cmd.motion = Some(Motion::LineEnd);
+                            cmd.action = Some(Action::Delete);
                         }
-                    },
-                    Motion::Semicolon => match self.last_find_cmd {
-                        Some(Modifier::Find {
-                            c,
-                            forwards,
-                            inclusive,
-                        }) => {
-                            cmd.modifier = Some(Modifier::Find {
+                        Motion::UpperYank => {
+                            cmd.motion = Some(Motion::LineEnd);
+                            cmd.action = Some(Action::Yank);
+                        }
+                        Motion::DeleteChar => {
+                            cmd.motion = Some(Motion::Right);
+                            cmd.action = Some(Action::Delete);
+                        }
+                        Motion::Comma => match self.last_find_cmd {
+                            Some(Modifier::Find {
                                 c,
                                 forwards,
                                 inclusive,
-                            });
+                            }) => {
+                                cmd.modifier = Some(Modifier::Find {
+                                    c,
+                                    forwards: !forwards,
+                                    inclusive,
+                                });
+                            }
+                            _ => {
+                                self.reset();
+                                return None;
+                            }
+                        },
+                        Motion::Semicolon => match self.last_find_cmd {
+                            Some(Modifier::Find {
+                                c,
+                                forwards,
+                                inclusive,
+                            }) => {
+                                cmd.modifier = Some(Modifier::Find {
+                                    c,
+                                    forwards,
+                                    inclusive,
+                                });
+                            }
+                            _ => {
+                                self.reset();
+                                return None;
+                            }
+                        },
+                        Motion::ChangeLine | Motion::Substitute => {
+                            cmd.action = Some(Action::Change);
+                            cmd.motion = Some(motion);
                         }
                         _ => {
-                            self.reset();
-                            return None;
+                            cmd.motion = Some(motion);
                         }
-                    },
-                    Motion::ChangeLine | Motion::Substitute => {
-                        cmd.action = Some(Action::Change);
-                        cmd.motion = Some(motion);
                     }
-                    _ => {
-                        cmd.motion = Some(motion);
-                    }
+                    return Some(cmd);
                 }
-                return Some(cmd);
             }
             // return none here so that the buffer doesn't reset
             // because we found a node but not yet a command
