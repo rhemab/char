@@ -267,7 +267,6 @@ impl Parser {
                         return None;
                     }
                 } else if visual_mode {
-                    eprintln!("visual mode: {}", visual_mode);
                     let cmd = Command {
                         modifier: Some(Modifier::Inside),
                         ..Default::default()
@@ -340,12 +339,12 @@ impl Parser {
                             return Some(cmd.clone());
                         }
                         // cib -> ci(
-                        (Some(_action), Some(_modifier), Motion::Back) => {
+                        (_, Some(_modifier), Motion::Back) => {
                             cmd.motion = Some(Motion::OpenParen);
                             return Some(cmd.clone());
                         }
                         // ciB -> ci{
-                        (Some(_action), Some(_modifier), Motion::PrevEmptyLine) => {
+                        (_, Some(_modifier), Motion::PrevEmptyLine) => {
                             cmd.motion = Some(Motion::OpenCurlyBrace);
                             return Some(cmd.clone());
                         }

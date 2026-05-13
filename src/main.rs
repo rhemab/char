@@ -1137,27 +1137,27 @@ impl App {
         }
 
         // update selection range
-        match self.mode {
-            Mode::VisualLine(y) => {
+        match (&self.mode, command.modifier) {
+            (Mode::VisualLine(y), None) => {
                 // if cursor is after ancor, ancor is at start of line
                 // else ancor is at end of line
                 if let Some(sel) = self.selections.first_mut() {
                     if cursor_target_idx >= sel.ancor {
-                        sel.ancor = self.rope.line_to_char(y);
+                        sel.ancor = self.rope.line_to_char(*y);
                         sel.cursor = line_end_idx(cursor_target_idx, &self.rope);
                     } else {
-                        sel.ancor = line_end_idx(self.rope.line_to_char(y), &self.rope);
+                        sel.ancor = line_end_idx(self.rope.line_to_char(*y), &self.rope);
                         let curr_line = self.rope.char_to_line(cursor_target_idx);
                         sel.cursor = self.rope.line_to_char(curr_line);
                     }
                 }
             }
-            Mode::Visual => {
+            (Mode::Visual, None) => {
                 if let Some(sel) = self.selections.first_mut() {
                     sel.cursor = cursor_target_idx;
                 }
             }
-            Mode::VisualBlock => {
+            (Mode::VisualBlock, _) => {
                 self.selections.clear();
             }
             _ => {
@@ -1182,6 +1182,7 @@ impl App {
                     _ => {}
                 }
                 range = (start_select_rng, end_select_rng);
+                cursor_target_idx = range.1;
             }
         }
 
