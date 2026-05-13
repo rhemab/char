@@ -1170,7 +1170,7 @@ impl App {
             }
         }
 
-        // update char range
+        // sync char range to visual selection
         if visual_mode {
             should_save_command = false;
             if let Some(sel) = self.selections.first_mut() {
