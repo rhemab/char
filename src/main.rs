@@ -1310,7 +1310,16 @@ impl App {
 
                 if x > 0 {
                     // NORMAL BACKSPACE: Just delete the char to the left
-                    self.rope.remove(idx - 1..idx);
+
+                    // check for bracket pair
+                    if CLOSING_BRACKETS.contains(&self.rope.char(idx))
+                        && OPENING_BRACKETS.contains(&self.rope.char(idx - 1))
+                    {
+                        self.rope.remove(idx - 1..=idx);
+                    } else {
+                        self.rope.remove(idx - 1..idx);
+                    }
+
                     self.cursor_pos.x -= 1;
                 } else if y > 0 {
                     // LINE MERGE: Backspacing at the start of a line
