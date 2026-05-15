@@ -1017,8 +1017,23 @@ impl App {
                             if self.rope.char(char_idx) != '\n' {
                                 insert_idx += 1;
                             }
+                            if visual_mode {
+                                if let Some(sel) = self.selections.first() {
+                                    let start = sel.ancor.min(sel.cursor);
+                                    let end = sel.ancor.max(sel.cursor);
+                                    eprintln!("start: {}", start);
+                                    eprintln!("end: {}", end);
+                                    self.rope.remove(start..=end);
+                                    insert_idx = start;
+                                }
+                            }
                             self.rope.insert(insert_idx, &content);
-                            cursor_target_idx = char_idx + content.len();
+                            cursor_target_idx = (insert_idx + content.len()).saturating_sub(1);
+                            eprintln!("cursor_target_idx: {}", cursor_target_idx);
+                            self.selections.clear();
+                            self.update_cursor_from_char_idx(cursor_target_idx);
+                            self.return_to_normal_mode();
+                            return;
                         }
                         YankBuffer::Lines(content) => {
                             // insert line below
