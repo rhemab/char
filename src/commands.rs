@@ -344,7 +344,7 @@ impl Parser {
                             return Some(cmd.clone());
                         }
                         // ciB -> ci{
-                        (_, Some(_modifier), Motion::PrevEmptyLine) => {
+                        (_, Some(_modifier), Motion::UpperBack) => {
                             cmd.motion = Some(Motion::OpenCurlyBrace);
                             return Some(cmd.clone());
                         }
