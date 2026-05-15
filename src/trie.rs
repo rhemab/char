@@ -1,6 +1,6 @@
 use crossterm::event::KeyEvent;
 
-use crate::commands::*;
+use crate::command_parser::*;
 
 pub struct TrieNode {
     pub command: Option<Motion>,

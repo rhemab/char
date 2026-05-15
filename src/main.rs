@@ -12,12 +12,12 @@ use ratatui::{
 
 use ropey::Rope;
 
-use crate::commands::*;
+use crate::command_parser::*;
 use crate::helpers::*;
 use crate::ranges::*;
 use crate::types::*;
 
-mod commands;
+mod command_parser;
 mod helpers;
 mod ranges;
 mod trie;
@@ -513,7 +513,12 @@ impl App {
         }
     }
 
-    fn execute_command(&mut self, command: commands::Command, visual_mode: bool, repeat: bool) {
+    fn execute_command(
+        &mut self,
+        command: command_parser::Command,
+        visual_mode: bool,
+        repeat: bool,
+    ) {
         self.parser.reset();
 
         eprintln!("Command: {:?}", command);
@@ -731,7 +736,7 @@ impl App {
                     inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '`')
                 {
                     match modifier {
-                        commands::Modifier::Around => {
+                        command_parser::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
                         }
                         _ => {
@@ -749,7 +754,7 @@ impl App {
                     inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '\'')
                 {
                     match modifier {
-                        commands::Modifier::Around => {
+                        command_parser::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
                         }
                         _ => {
@@ -767,7 +772,7 @@ impl App {
                     inside_quotes(self.cursor_pos.x, self.cursor_pos.y, &self.rope, '"')
                 {
                     match modifier {
-                        commands::Modifier::Around => {
+                        command_parser::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
                         }
                         _ => {
@@ -783,7 +788,7 @@ impl App {
             (Some(Motion::OpenAngleBracket), _, Some(modifier)) => {
                 if let Some(r) = inside_brackets(char_idx, &self.rope, '<', '>') {
                     match modifier {
-                        commands::Modifier::Around => {
+                        command_parser::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
                         }
                         _ => {
@@ -799,7 +804,7 @@ impl App {
             (Some(Motion::OpenCurlyBrace), _, Some(modifier)) => {
                 if let Some(r) = inside_brackets(char_idx, &self.rope, '{', '}') {
                     match modifier {
-                        commands::Modifier::Around => {
+                        command_parser::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
                         }
                         _ => {
@@ -815,7 +820,7 @@ impl App {
             (Some(Motion::OpenBracket), _, Some(modifier)) => {
                 if let Some(r) = inside_brackets(char_idx, &self.rope, '[', ']') {
                     match modifier {
-                        commands::Modifier::Around => {
+                        command_parser::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
                         }
                         _ => {
@@ -831,7 +836,7 @@ impl App {
             (Some(Motion::OpenParen), _, Some(modifier)) => {
                 if let Some(r) = inside_brackets(char_idx, &self.rope, '(', ')') {
                     match modifier {
-                        commands::Modifier::Around => {
+                        command_parser::Modifier::Around => {
                             range = (r.0 - 1, r.1 + 1);
                         }
                         _ => {
@@ -844,7 +849,7 @@ impl App {
                     return;
                 }
             }
-            (Some(Motion::Word), _, Some(commands::Modifier::Inside)) => {
+            (Some(Motion::Word), _, Some(command_parser::Modifier::Inside)) => {
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
                     self.last_command = command.clone();
@@ -862,7 +867,7 @@ impl App {
                 cursor_target_idx = range.1;
                 should_update_preferred_x = true;
             }
-            (Some(Motion::UpperWord), _, Some(commands::Modifier::Inside)) => {
+            (Some(Motion::UpperWord), _, Some(command_parser::Modifier::Inside)) => {
                 let rope_line = self.rope.line(self.cursor_pos.y);
                 if is_empty_line(&rope_line) {
                     self.last_command = command.clone();
@@ -1110,7 +1115,7 @@ impl App {
             (
                 None,
                 _,
-                Some(commands::Modifier::Find {
+                Some(command_parser::Modifier::Find {
                     c,
                     forwards,
                     inclusive,

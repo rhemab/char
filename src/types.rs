@@ -1,6 +1,6 @@
 use ropey::Rope;
 
-use crate::commands::*;
+use crate::command_parser::*;
 
 use std::collections::HashMap;
 

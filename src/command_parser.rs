@@ -348,6 +348,10 @@ impl Parser {
                             cmd.motion = Some(Motion::OpenCurlyBrace);
                             return Some(cmd.clone());
                         }
+                        (_, Some(_modifier), Motion::PrevEmptyLine) => {
+                            cmd.motion = Some(Motion::OpenCurlyBrace);
+                            return Some(cmd.clone());
+                        }
                         // , -> repeat last find in reverse
                         (_, None, Motion::Comma) => match self.last_find_cmd {
                             Some(Modifier::Find {
