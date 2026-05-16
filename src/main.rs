@@ -320,6 +320,9 @@ impl App {
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
+        // if self.redraw is true and there is not event within the specified duration,
+        // then redraw the screen.
+        // This is used to show a yank highlight for the specified duration.
         if self.redraw {
             match event::poll(std::time::Duration::from_millis(HIGHLIGHT_DURATION)) {
                 Ok(false) => {
@@ -1009,7 +1012,8 @@ impl App {
             }
             (Some(Motion::Paste), _, _) => {
                 should_save_command = true;
-                if let Some(buf) = self.yank_buffer.get(&'"') {
+                if let Some(buf) = self.yank_buffer.get_mut(&'"') {
+                    let mut new_content = String::new();
                     match buf {
                         YankBuffer::Chars(content) => {
                             let mut insert_idx = char_idx;
@@ -1017,6 +1021,26 @@ impl App {
                             if self.rope.char(char_idx) != '\n' {
                                 insert_idx += 1;
                             }
+                            if visual_mode {
+                                if let Some(sel) = self.selections.first() {
+                                    let start = sel.ancor.min(sel.cursor);
+                                    let end = sel.ancor.max(sel.cursor);
+                                    new_content = self.rope.slice(start..=end).to_string();
+                                    self.rope.remove(start..=end);
+                                    insert_idx = start;
+                                }
+                            }
+                            self.rope.insert(insert_idx, &content);
+                            cursor_target_idx = (insert_idx + content.len()).saturating_sub(1);
+                            self.selections.clear();
+                            *content = new_content;
+                            self.update_cursor_from_char_idx(cursor_target_idx);
+                            self.return_to_normal_mode();
+                            return;
+                        }
+                        YankBuffer::Lines(content) => {
+                            // insert line below
+                            let mut insert_idx = self.rope.line_to_char(self.cursor_pos.y + 1);
                             if visual_mode {
                                 if let Some(sel) = self.selections.first() {
                                     let start = sel.ancor.min(sel.cursor);
@@ -1031,12 +1055,6 @@ impl App {
                             self.update_cursor_from_char_idx(cursor_target_idx);
                             self.return_to_normal_mode();
                             return;
-                        }
-                        YankBuffer::Lines(content) => {
-                            // insert line below
-                            let idx = self.rope.line_to_char(self.cursor_pos.y + 1);
-                            self.rope.insert(idx, &content);
-                            cursor_target_idx = idx;
                         }
                         YankBuffer::Block(strings) => {
                             let mut y = self.cursor_pos.y;
