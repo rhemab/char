@@ -110,7 +110,6 @@ impl App {
         if self.highlight_yank {
             self.redraw = true;
             highlight_text = true;
-            eprintln!("{:?}", self.selections);
         }
         match self.mode {
             Mode::Command => {
@@ -570,8 +569,6 @@ type esc to return to normal mode
         repeat: bool,
     ) {
         self.parser.reset();
-
-        eprintln!("Command: {:?}", command);
 
         let action = command.action.is_some();
         let mut should_update_preferred_x = false;

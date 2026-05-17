@@ -282,7 +282,6 @@ impl Parser {
                         return None;
                     }
                 } else if visual_mode {
-                    eprintln!("visual mode: {}", visual_mode);
                     let cmd = Command {
                         modifier: Some(Modifier::Around),
                         ..Default::default()
