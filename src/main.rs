@@ -17,6 +17,7 @@ use crate::helpers::*;
 use crate::ranges::*;
 use crate::types::*;
 
+mod undo;
 mod command_parser;
 mod helpers;
 mod ranges;
@@ -1014,7 +1015,7 @@ type esc to return to normal mode
                     text.push_str(&whitespace);
                     text.push_str("    ");
                     self.rope.insert(last_char_idx, &text);
-                    self.last_insertion += "\n";
+                    self.last_insertion.1 += "\n";
                     let cursor_target_idx = last_char_idx + whitespace.len() + 5;
                     self.update_cursor_from_char_idx(cursor_target_idx);
                 } else {
@@ -1167,8 +1168,8 @@ type esc to return to normal mode
                 self.execute_command(self.last_command.clone(), visual_mode, true);
                 if self.mode == Mode::Insert {
                     let idx = self.get_char_idx();
-                    self.rope.insert(idx, &self.last_insertion);
-                    self.update_cursor_from_char_idx(idx + self.last_insertion.len() - 1);
+                    self.rope.insert(idx, &self.last_insertion.1);
+                    self.update_cursor_from_char_idx(idx + self.last_insertion.1.len() - 1);
                     self.ensure_valid_normal_pos();
                 }
                 self.change_mode(Mode::Normal);
@@ -1213,6 +1214,19 @@ type esc to return to normal mode
             }
             (Some(Motion::Substitute), Some(_action), None) => {
                 range = (char_idx, char_idx + count);
+            }
+            (Some(Motion::Undo), None, None) => {
+                if let Some(a) = self.undo_vec.pop() {
+                    a.undo(&mut self.rope);
+                    self.redo_vec.push(a);
+                }
+            }
+            (Some(Motion::Redo), None, None) => {
+                if let Some(a) = self.redo_vec.pop() {
+                    let len = a.execute(&mut self.rope);
+                    cursor_target_idx += len;
+                    self.undo_vec.push(a);
+                }
             }
             _ => {}
         }
@@ -1337,7 +1351,8 @@ type esc to return to normal mode
         }
 
         if self.mode == Mode::Insert && !repeat {
-            self.last_insertion.clear();
+            self.last_insertion.1.clear();
+            self.last_insertion.0 = self.get_char_idx();
         }
 
         if should_save_command {
@@ -1386,7 +1401,7 @@ type esc to return to normal mode
             KeyCode::Backspace => {
                 let x = self.cursor_pos.x;
                 let y = self.cursor_pos.y;
-                self.last_insertion.pop();
+                self.last_insertion.1.pop();
 
                 if x > 0 {
                     // NORMAL BACKSPACE: Just delete the char to the left
@@ -1447,7 +1462,7 @@ type esc to return to normal mode
                     text.push_str(&whitespace);
                     // move the cursor forwards whitepace + '\n'
                     self.rope.insert(idx, &text);
-                    self.last_insertion += "\n";
+                    self.last_insertion.1 += "\n";
                     let cursor_target_idx = idx + whitespace.len() + 5;
                     self.update_cursor_from_char_idx(cursor_target_idx);
                 } else if OPENING_BRACKETS.contains(&left_char) {
@@ -1461,7 +1476,7 @@ type esc to return to normal mode
                     text.push_str(&whitespace);
                     text.push_str("    ");
                     self.rope.insert(idx, &text);
-                    self.last_insertion += "\n";
+                    self.last_insertion.1 += "\n";
                     let cursor_target_idx = idx + whitespace.len() + 5;
                     self.update_cursor_from_char_idx(cursor_target_idx);
                 } else {
@@ -1481,7 +1496,7 @@ type esc to return to normal mode
         }
         if let Some(text) = text_to_insert {
             self.rope.insert(idx, &text);
-            self.last_insertion += &text;
+            self.last_insertion.1 += &text;
         }
         self.scroll(self.cursor_pos.y);
     }
@@ -1518,6 +1533,12 @@ type esc to return to normal mode
             Mode::Normal => {
                 if self.mode != Mode::Search && self.mode != Mode::Command {
                     self.command_bar.clear();
+                }
+                if self.mode == Mode::Insert {
+                    let action = undo::Action::Insert {
+                        idx: self.last_insertion.0, content: self.last_insertion.1.clone(),
+                    };
+                    self.undo_vec.push(action);
                 }
             }
             Mode::Search => {

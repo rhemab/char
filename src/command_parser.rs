@@ -59,6 +59,8 @@ pub enum Motion {
     Comma,
     Semicolon,
     Substitute,
+    Undo,
+    Redo,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -682,6 +684,14 @@ fn generate_trie() -> TrieNode {
     trie.insert(
         &[KeyEvent::new(KeyCode::Char('S'), KeyModifiers::empty())],
         Motion::ChangeLine,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('u'), KeyModifiers::empty())],
+        Motion::Undo,
+    );
+    trie.insert(
+        &[KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)],
+        Motion::Redo,
     );
 
     trie

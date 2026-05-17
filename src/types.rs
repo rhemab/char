@@ -1,6 +1,7 @@
 use ropey::Rope;
 
 use crate::command_parser::*;
+use crate::undo;
 
 use std::collections::HashMap;
 
@@ -9,7 +10,7 @@ pub struct App {
     pub show_first_time_popup: bool,
     pub lines_in_view: [usize; 2],
     pub last_command: Command,
-    pub last_insertion: String,
+    pub last_insertion: (usize, String),
     pub redraw: bool,
     pub dirty: bool,
     pub mode: Mode,
@@ -26,6 +27,8 @@ pub struct App {
     pub query: String,
     pub visual_block_rng: Option<VisualBlockRng>,
     pub matching_bracket_idx: Option<usize>,
+    pub undo_vec: Vec<undo::Action>,
+    pub redo_vec: Vec<undo::Action>,
 }
 
 #[derive(Clone)]
