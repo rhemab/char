@@ -74,8 +74,11 @@ impl App {
         args.next();
         if let Some(path) = args.next() {
             // load file
-            let rope = Rope::from_reader(fs::File::open(&path)?)?;
-            self.rope = rope;
+            if let Ok(file) = fs::File::open(&path) {
+                self.rope = Rope::from_reader(file)?;
+            } else {
+                self.rope = Rope::from_str("\n");
+            }
             self.path = path;
         }
         self.command_bar.push_str(&format!(

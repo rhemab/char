@@ -3,7 +3,11 @@ use crate::{CLOSING_BRACKETS, OPENING_BRACKETS};
 use ropey::{Rope, RopeSlice};
 
 pub fn is_end_of_line(idx: usize, rope: &Rope) -> bool {
-    rope.char(idx) == '\n'
+    if let Some(c) = rope.get_char(idx) {
+        return c == '\n';
+    }
+
+    true
 }
 
 pub fn is_empty_line(rope_line: &RopeSlice) -> bool {
