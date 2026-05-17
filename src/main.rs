@@ -412,7 +412,9 @@ type esc to return to normal mode
                                     match helpers::write_file(&self.rope, path) {
                                         Ok(s) => {
                                             self.command_bar.push_str(&s);
-                                            self.path = path.to_string();
+                                            if self.path == "[new file]" {
+                                                self.path = path.to_string();
+                                            }
                                         }
                                         Err(err) => {
                                             self.command_bar.push_str(&format!("error: {:?}", err));
