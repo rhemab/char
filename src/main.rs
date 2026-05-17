@@ -73,19 +73,24 @@ impl App {
         let mut args = env::args();
         args.next();
         if let Some(path) = args.next() {
-            // load file
+            // try to load file
             if let Ok(file) = fs::File::open(&path) {
                 self.rope = Rope::from_reader(file)?;
             } else {
+                // file doesn't exist
                 self.rope = Rope::from_str("\n");
-                self.show_first_time_popup = true;
             }
             self.path = path;
+        } else {
+            // no path was specified
+            self.show_first_time_popup = true;
+            self.rope = Rope::from_str("\n");
+            self.path = "[new file]".to_string();
         }
         self.command_bar.push_str(&format!(
             "\"{}\" {}L, {}",
             &self.path,
-            self.rope.len_lines() - 1,
+            self.rope.len_lines().saturating_sub(1),
             format_file_size(self.rope.len_bytes()),
         ));
 
@@ -335,7 +340,7 @@ type esc to return to normal mode
 ";
             let area = frame
                 .area()
-                .centered(Constraint::Percentage(60), Constraint::Percentage(50));
+                .centered(Constraint::Percentage(60), Constraint::Percentage(40));
             let popup = Paragraph::new(popup_content).block(Block::bordered().title(" Char "));
             frame.render_widget(Clear, area);
             frame.render_widget(popup, area);
@@ -391,33 +396,49 @@ type esc to return to normal mode
             Mode::Command | Mode::Search => {
                 match key_event.code {
                     KeyCode::Enter => {
-                        match self.command_bar.as_str() {
-                            ":q" => {
+                        let command_bar = self.command_bar.clone();
+                        let mut command_iter = command_bar.split_whitespace();
+                        let command = command_iter.next();
+                        let arg = command_iter.next();
+                        match (command, arg) {
+                            (Some(":q"), _) => {
                                 self.exit();
                                 return;
                             }
-                            ":w" => {
+                            (Some(":w") | Some(":wq"), arg) => {
                                 self.command_bar.clear();
-                                if let Err(err) = self.write_file() {
-                                    eprintln!("write err: {:?}", err);
-                                    self.command_bar.push_str(&format!("failed to write file"));
-                                } else {
-                                    self.command_bar.push_str(&format!(
-                                        "\"{}\" {}L, {} written",
-                                        &self.path,
-                                        self.rope.len_lines() - 1,
-                                        format_file_size(self.rope.len_bytes()),
-                                    ));
+                                // try save to path: arg
+                                if let Some(path) = arg {
+                                    match helpers::write_file(&self.rope, path) {
+                                        Ok(s) => {
+                                            self.command_bar.push_str(&s);
+                                            self.path = path.to_string();
+                                        }
+                                        Err(err) => {
+                                            self.command_bar.push_str(&format!("error: {:?}", err));
+                                        }
+                                    }
+                                } else if self.path == "[new file]" {
+                                    self.command_bar
+                                        .push_str(&format!("error: no file name specified"));
+                                } else if !self.path.is_empty() {
+                                    // save to self.path
+                                    match helpers::write_file(&self.rope, &self.path) {
+                                        Ok(s) => {
+                                            self.command_bar.push_str(&s);
+                                        }
+                                        Err(err) => {
+                                            self.command_bar.push_str(&format!("error: {:?}", err));
+                                        }
+                                    }
                                 }
-                            }
-                            ":wq" => {
-                                self.command_bar.clear();
-                                if let Err(err) = self.write_file() {
-                                    eprintln!("write err: {:?}", err);
-                                    self.command_bar.push_str(&format!("failed to write file"));
-                                } else {
-                                    self.exit();
-                                    return;
+
+                                match command {
+                                    Some(":wq") => {
+                                        self.exit();
+                                        return;
+                                    }
+                                    _ => {}
                                 }
                             }
                             _ => {}
@@ -1491,12 +1512,6 @@ type esc to return to normal mode
 
     fn exit(&mut self) {
         self.mode = Mode::Exit;
-    }
-
-    fn write_file(&self) -> io::Result<()> {
-        self.rope
-            .write_to(std::io::BufWriter::new(fs::File::create(&self.path)?))?;
-        Ok(())
     }
 
     fn change_mode(&mut self, target_mode: Mode) {

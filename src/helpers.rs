@@ -1,3 +1,13 @@
+pub fn write_file(rope: &ropey::Rope, path: &str) -> std::io::Result<String> {
+    rope.write_to(std::io::BufWriter::new(std::fs::File::create(path)?))?;
+    Ok(format!(
+        "\"{}\" {}L, {} written",
+        path,
+        rope.len_lines() - 1,
+        format_file_size(rope.len_bytes()),
+    ))
+}
+
 pub fn format_file_size(bytes: usize) -> String {
     const KB: usize = 1024;
     const MB: usize = 1024 * KB;
