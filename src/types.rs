@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct App {
+    pub show_first_time_popup: bool,
     pub lines_in_view: [usize; 2],
     pub last_command: Command,
     pub last_insertion: String,

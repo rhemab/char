@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     prelude::*,
     style::{Color, Style},
-    widgets::Block,
+    widgets::{Block, Clear, Paragraph},
 };
 
 use ropey::Rope;
@@ -78,6 +78,7 @@ impl App {
                 self.rope = Rope::from_reader(file)?;
             } else {
                 self.rope = Rope::from_str("\n");
+                self.show_first_time_popup = true;
             }
             self.path = path;
         }
@@ -320,6 +321,25 @@ impl App {
 
         // render cursor
         frame.set_cursor_position((cursor_x as u16, cursor_y as u16));
+
+        if self.show_first_time_popup {
+            // render first time popup
+            let popup_content = "
+A simple, vim-like text editor with pleasant defaults
+and zero required configuration.
+
+type :q to exit
+type :w to save
+type i to enter insert mode
+type esc to return to normal mode
+";
+            let area = frame
+                .area()
+                .centered(Constraint::Percentage(60), Constraint::Percentage(50));
+            let popup = Paragraph::new(popup_content).block(Block::bordered().title(" Char "));
+            frame.render_widget(Clear, area);
+            frame.render_widget(popup, area);
+        }
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -513,6 +533,7 @@ impl App {
                     _ => false,
                 };
                 if let Some(command) = self.parser.generate_command(key_event, visual_mode) {
+                    self.show_first_time_popup = false;
                     self.execute_command(command, visual_mode, false);
                 }
             }
