@@ -683,7 +683,9 @@ impl App {
             (Some(Motion::Down), Some(action), _) => match action {
                 Action::Change => {
                     let start = self.rope.line_to_char(self.cursor_pos.y);
-                    let end = self.rope.line_to_char(self.cursor_pos.y + count);
+                    let end_y = self.cursor_pos.y + count;
+                    let end_line_len = self.rope.line(end_y).len_chars();
+                    let end = self.rope.line_to_char(end_y) + end_line_len.saturating_sub(1);
                     range = (start, end);
                 }
                 _ => {
