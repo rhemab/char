@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     prelude::*,
     style::{Color, Style},
-    widgets::{Block, Clear, Paragraph},
+    widgets::{Block, Paragraph},
 };
 
 use ropey::Rope;
@@ -17,12 +17,12 @@ use crate::helpers::*;
 use crate::ranges::*;
 use crate::types::*;
 
-mod undo;
 mod command_parser;
 mod helpers;
 mod ranges;
 mod trie;
 pub mod types;
+mod undo;
 
 const HIGHLIGHT_DURATION: u64 = 150;
 const SCROLL_OFFSET: usize = 10;
@@ -327,23 +327,66 @@ impl App {
         // render cursor
         frame.set_cursor_position((cursor_x as u16, cursor_y as u16));
 
+        if self.show_first_time_popup && self.rope.len_chars() > 1 {
+            self.show_first_time_popup = false;
+        }
         if self.show_first_time_popup {
             // render first time popup
-            let popup_content = "
-A simple, vim-like text editor with pleasant defaults
-and zero required configuration.
-
-type :q to exit
-type :w to save
-type i to enter insert mode
-type esc to return to normal mode
-";
             let area = frame
                 .area()
                 .centered(Constraint::Percentage(60), Constraint::Percentage(40));
-            let popup = Paragraph::new(popup_content).block(Block::bordered().title(" Char "));
-            frame.render_widget(Clear, area);
-            frame.render_widget(popup, area);
+
+            let chunks = Layout::vertical([
+                Constraint::Length(3), // title + subtitle + gap
+                Constraint::Length(4), // commands
+                Constraint::Length(2), // gap + footer
+            ])
+            .split(area);
+
+            // Title block — centered
+            let header = Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "char",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "fast, reliable, zero config",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ])
+            .alignment(Alignment::Center);
+
+            // Commands block — left aligned within the centered area
+            let commands = Paragraph::new(vec![
+                Line::from(vec![
+                    Span::raw("                 "),
+                    Span::styled(":e <file>", Style::default().fg(Color::Magenta)),
+                    Span::raw("      open a file"),
+                ]),
+                Line::from(vec![
+                    Span::raw("                 "),
+                    Span::styled(":q", Style::default().fg(Color::Magenta)),
+                    Span::raw("             quit"),
+                ]),
+                Line::from(vec![
+                    Span::raw("                 "),
+                    Span::styled(":help", Style::default().fg(Color::Magenta)),
+                    Span::raw("          open help docs"),
+                ]),
+            ]);
+
+            // Footer — centered
+            let footer = Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled("v0.2.0", Style::default().fg(Color::DarkGray))),
+            ])
+            .alignment(Alignment::Center);
+
+            frame.render_widget(header, chunks[0]);
+            frame.render_widget(commands, chunks[1]);
+            frame.render_widget(footer, chunks[2]);
         }
     }
 
@@ -556,7 +599,6 @@ type esc to return to normal mode
                     _ => false,
                 };
                 if let Some(command) = self.parser.generate_command(key_event, visual_mode) {
-                    self.show_first_time_popup = false;
                     self.execute_command(command, visual_mode, false);
                 }
             }
@@ -1542,7 +1584,8 @@ type esc to return to normal mode
                 }
                 if self.mode == Mode::Insert {
                     let action = undo::Action::Insert {
-                        idx: self.last_insertion.0, content: self.last_insertion.1.clone(),
+                        idx: self.last_insertion.0,
+                        content: self.last_insertion.1.clone(),
                     };
                     self.undo_vec.push(action);
                 }
