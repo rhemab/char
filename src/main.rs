@@ -348,7 +348,7 @@ impl App {
                 Line::from(Span::styled(
                     "char",
                     Style::default()
-                        .fg(Color::White)
+                        .fg(Color::Blue)
                         .add_modifier(ratatui::style::Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
@@ -361,17 +361,17 @@ impl App {
             // Commands block — left aligned within the centered area
             let commands = Paragraph::new(vec![
                 Line::from(vec![
-                    Span::raw("                 "),
+                    Span::raw("                     "),
                     Span::styled(":e <file>", Style::default().fg(Color::Magenta)),
                     Span::raw("      open a file"),
                 ]),
                 Line::from(vec![
-                    Span::raw("                 "),
+                    Span::raw("                     "),
                     Span::styled(":q", Style::default().fg(Color::Magenta)),
                     Span::raw("             quit"),
                 ]),
                 Line::from(vec![
-                    Span::raw("                 "),
+                    Span::raw("                     "),
                     Span::styled(":help", Style::default().fg(Color::Magenta)),
                     Span::raw("          open help docs"),
                 ]),
