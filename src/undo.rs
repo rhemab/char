@@ -18,14 +18,16 @@ impl Action {
         }
     }
     
-    pub fn undo(&self, rope: &mut ropey::Rope) {
+    pub fn undo(&self, rope: &mut ropey::Rope) -> usize {
         match self {
             Action::Insert {idx, content} => {
                 let end_idx = idx + content.len();
                 rope.remove(idx..&end_idx);
+                return 0;
             }
             Action::Delete {idx, content} => {
                 rope.insert(*idx, &content);
+                return content.len();
             }
         }
     }

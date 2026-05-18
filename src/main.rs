@@ -1217,7 +1217,8 @@ type esc to return to normal mode
             }
             (Some(Motion::Undo), None, None) => {
                 if let Some(a) = self.undo_vec.pop() {
-                    a.undo(&mut self.rope);
+                    let len = a.undo(&mut self.rope);
+                    cursor_target_idx += len;
                     self.redo_vec.push(a);
                 }
             }
@@ -1333,6 +1334,11 @@ type esc to return to normal mode
                 should_move_cursor = false;
             }
             Some(Action::Delete) | Some(Action::Change) => {
+                let action = undo::Action::Delete {
+                    idx: range.0,
+                    content: self.rope.slice(range.0..range.1).into(),
+                };
+                self.undo_vec.push(action);
                 // delete range
                 self.rope.remove(range.0..range.1);
                 self.cursor_pos.preferred_x = self.cursor_pos.x;
