@@ -27,6 +27,8 @@ mod undo;
 const HIGHLIGHT_DURATION: u64 = 150;
 const SCROLL_OFFSET: usize = 10;
 
+const NEW_PATH: &'static str = "[new]";
+
 const OPENING_BRACKETS: [char; 4] = ['[', '(', '{', '<'];
 const CLOSING_BRACKETS: [char; 4] = [']', ')', '}', '>'];
 const PAIRS: [[char; 2]; 7] = [
@@ -86,7 +88,7 @@ impl App {
             // no path was specified
             self.show_first_time_popup = true;
             self.rope = Rope::from_str("\n");
-            self.path = "[new file]".to_string();
+            self.path = NEW_PATH.to_string();
         }
         self.command_bar.push_str(&format!(
             "\"{}\" {}L, {}",
@@ -334,7 +336,7 @@ impl App {
             // render first time popup
             let area = frame
                 .area()
-                .centered(Constraint::Percentage(60), Constraint::Percentage(40));
+                .centered(Constraint::Percentage(40), Constraint::Percentage(40));
 
             let chunks = Layout::vertical([
                 Constraint::Length(3), // title + subtitle + gap
@@ -361,17 +363,14 @@ impl App {
             // Commands block — left aligned within the centered area
             let commands = Paragraph::new(vec![
                 Line::from(vec![
-                    Span::raw("                     "),
                     Span::styled(":e <file>", Style::default().fg(Color::Magenta)),
                     Span::raw("      open a file"),
                 ]),
                 Line::from(vec![
-                    Span::raw("                     "),
                     Span::styled(":q", Style::default().fg(Color::Magenta)),
                     Span::raw("             quit"),
                 ]),
                 Line::from(vec![
-                    Span::raw("                     "),
                     Span::styled(":help", Style::default().fg(Color::Magenta)),
                     Span::raw("          open help docs"),
                 ]),
@@ -455,7 +454,7 @@ impl App {
                                     match helpers::write_file(&self.rope, path) {
                                         Ok(s) => {
                                             self.command_bar.push_str(&s);
-                                            if self.path == "[new file]" {
+                                            if self.path == NEW_PATH {
                                                 self.path = path.to_string();
                                             }
                                         }
@@ -463,7 +462,7 @@ impl App {
                                             self.command_bar.push_str(&format!("error: {:?}", err));
                                         }
                                     }
-                                } else if self.path == "[new file]" {
+                                } else if self.path == NEW_PATH {
                                     self.command_bar
                                         .push_str(&format!("error: no file name specified"));
                                 } else if !self.path.is_empty() {
