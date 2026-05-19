@@ -338,54 +338,40 @@ impl App {
                 .area()
                 .centered(Constraint::Percentage(40), Constraint::Percentage(40));
 
-            let chunks = Layout::vertical([
-                Constraint::Length(3), // title + subtitle + gap
-                Constraint::Length(4), // commands
-                Constraint::Length(2), // gap + footer
-            ])
-            .split(area);
-
-            // Title block — centered
-            let header = Paragraph::new(vec![
+            let lines = vec![
                 Line::from(Span::styled(
                     "char",
                     Style::default()
-                        .fg(Color::Blue)
+                        .fg(Color::White)
                         .add_modifier(ratatui::style::Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
                     "fast, reliable, zero config",
                     Style::default().fg(Color::DarkGray),
                 )),
-            ])
-            .alignment(Alignment::Center);
-
-            // Commands block — left aligned within the centered area
-            let commands = Paragraph::new(vec![
+                Line::from(""),
                 Line::from(vec![
                     Span::styled(":e <file>", Style::default().fg(Color::Magenta)),
-                    Span::raw("      open a file"),
+                    Span::raw("     open a file"),
                 ]),
                 Line::from(vec![
                     Span::styled(":q", Style::default().fg(Color::Magenta)),
-                    Span::raw("             quit"),
+                    Span::raw("            quit"),
+                ]),
+                Line::from(vec![
+                    Span::styled("<space>f", Style::default().fg(Color::Magenta)),
+                    Span::raw("      search directory"),
                 ]),
                 Line::from(vec![
                     Span::styled(":help", Style::default().fg(Color::Magenta)),
-                    Span::raw("          open help docs"),
+                    Span::raw("         open help docs"),
                 ]),
-            ]);
-
-            // Footer — centered
-            let footer = Paragraph::new(vec![
                 Line::from(""),
                 Line::from(Span::styled("v0.2.0", Style::default().fg(Color::DarkGray))),
-            ])
-            .alignment(Alignment::Center);
+            ];
 
-            frame.render_widget(header, chunks[0]);
-            frame.render_widget(commands, chunks[1]);
-            frame.render_widget(footer, chunks[2]);
+            let para = Paragraph::new(lines);
+            frame.render_widget(para, area);
         }
     }
 
