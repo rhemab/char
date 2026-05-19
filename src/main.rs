@@ -1600,6 +1600,7 @@ impl App {
                 self.command_bar.push_str(":");
             }
             Mode::Insert => {
+                self.selections.clear();
                 self.command_bar.clear();
                 self.command_bar.push_str("-- INSERT --");
             }
