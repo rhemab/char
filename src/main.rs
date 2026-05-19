@@ -1301,6 +1301,7 @@ impl App {
                 let mut end_select_rng = sel.ancor.max(sel.cursor);
                 match command.action {
                     Some(Action::Delete) => end_select_rng += 1,
+                    Some(Action::Change) => end_select_rng += 1,
                     Some(Action::Yank) => end_select_rng += 1,
                     _ => {}
                 }
