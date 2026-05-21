@@ -1,4 +1,6 @@
 use ropey::Rope;
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
 
 use crate::command_parser::*;
 use crate::undo;
@@ -6,7 +8,14 @@ use crate::undo;
 use std::collections::HashMap;
 
 #[derive(Default)]
+pub struct Highlight {
+    pub syntax_set: SyntaxSet,
+    pub theme_set: ThemeSet,
+}
+
+#[derive(Default)]
 pub struct App {
+    pub highlight: Highlight,
     pub show_first_time_popup: bool,
     pub lines_in_view: [usize; 2],
     pub last_command: Command,

@@ -11,6 +11,11 @@ use ratatui::{
 };
 
 use ropey::Rope;
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{Style as SyntectStyle, ThemeSet},
+    parsing::SyntaxSet,
+};
 
 use crate::command_parser::*;
 use crate::helpers::*;
@@ -100,6 +105,9 @@ impl App {
         self.yank_buffer
             .insert('"', YankBuffer::Chars(String::new()));
 
+        self.highlight.syntax_set = SyntaxSet::load_defaults_newlines();
+        self.highlight.theme_set = ThemeSet::load_defaults();
+
         while self.mode != Mode::Exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
@@ -108,6 +116,7 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        let draw_time = std::time::Instant::now();
         let mut visual_block_rng = None;
         let mut highlight_text = false;
         if self.highlight_yank {
@@ -153,6 +162,17 @@ impl App {
         let end_line_idx = (start_line_idx + height).min(self.rope.len_lines());
         self.lines_in_view = [start_line_idx, end_line_idx];
 
+        let syntax = self
+            .highlight
+            .syntax_set
+            .find_syntax_by_extension("rs")
+            .unwrap();
+        let mut h = HighlightLines::new(
+            syntax,
+            &self.highlight.theme_set.themes["base16-ocean.dark"],
+        );
+
+        let create_lines_time = std::time::Instant::now();
         // convert rope slice to ratatui line
         let mut lines = Vec::new();
         let mut line_nums = vec![];
@@ -207,19 +227,17 @@ impl App {
                                 continue;
                             }
                             if !highlighting && !char_buffer.is_empty() {
-                                line_of_spans.push(Span::raw(char_buffer.clone()));
-                                char_buffer.clear();
+                                line_of_spans.push(Span::raw(std::mem::take(&mut char_buffer)));
                             }
                             highlighting = true;
                             char_buffer.push(c);
                         } else {
                             if highlighting && !char_buffer.is_empty() {
                                 line_of_spans.push(
-                                    Span::raw(char_buffer.clone())
+                                    Span::raw(std::mem::take(&mut char_buffer))
                                         .fg(Color::White)
                                         .bg(Color::DarkGray),
                                 );
-                                char_buffer.clear();
                             }
                             highlighting = false;
                             char_buffer.push(c);
@@ -228,18 +246,31 @@ impl App {
                     if !char_buffer.is_empty() {
                         if highlighting {
                             line_of_spans.push(
-                                Span::raw(char_buffer.clone())
+                                Span::raw(std::mem::take(&mut char_buffer))
                                     .fg(Color::White)
                                     .bg(Color::DarkGray),
                             );
                         } else {
-                            line_of_spans.push(Span::raw(char_buffer.clone()));
+                            line_of_spans.push(Span::raw(std::mem::take(&mut char_buffer)));
                         }
                     }
 
                     lines.push(Line::from(line_of_spans));
                 } else {
-                    lines.push(Line::from(rope_line.to_string()));
+                    let line_str = rope_line.to_string();
+                    let ranges: Vec<(SyntectStyle, &str)> = h
+                        .highlight_line(&line_str, &self.highlight.syntax_set)
+                        .unwrap();
+                    let mut spans = vec![];
+                    for (syntect_style, content) in ranges {
+                        let r = syntect_style.foreground.r;
+                        let g = syntect_style.foreground.g;
+                        let b = syntect_style.foreground.b;
+                        let style = Style::new().fg(Color::Rgb(r, g, b));
+                        let span = Span::styled(content.to_string(), style);
+                        spans.push(span);
+                    }
+                    lines.push(Line::from(spans));
                 }
 
                 // generate line numbers
@@ -262,7 +293,11 @@ impl App {
             }
         }
 
+        eprintln!("lines time: {:?}", create_lines_time.elapsed());
+
         self.highlight_yank = false;
+
+        let create_nums_time = std::time::Instant::now();
 
         let n = self.rope.len_lines();
         let digits = if n == 0 { 1 } else { n.ilog10() + 2 };
@@ -281,6 +316,8 @@ impl App {
         } else {
             self.cursor_pos.y.saturating_sub(self.top_line)
         };
+
+        eprintln!("line nums time: {:?}", create_nums_time.elapsed());
 
         // content of status bar
         let text_content = Text::from(lines);
@@ -373,6 +410,7 @@ impl App {
             let para = Paragraph::new(lines);
             frame.render_widget(para, area);
         }
+        eprintln!("draw time: {:?}", draw_time.elapsed());
     }
 
     fn handle_events(&mut self) -> io::Result<()> {

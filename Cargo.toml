@@ -8,6 +8,7 @@ color-eyre = "0.6.5"
 crossterm = "0.29.0"
 ratatui = "0.30.0"
 ropey = "1.6.1"
+syntect = "5.3.0"
 
 [profile.release]
 codegen-units = 1 
