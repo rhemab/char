@@ -186,13 +186,17 @@ impl App {
 
                 // check for matching bracket
                 if let Some(i) = self.matching_bracket_idx {
-                    current_selections.push([i, i]);
+                    // only push for current line
+                    if line_end_char > i && line_start_char <= i {
+                        current_selections.push([i, i]);
+                    }
                 }
 
                 if highlight_text {
                     for sel in &self.selections {
                         let start = sel.ancor.min(sel.cursor);
                         let end = sel.ancor.max(sel.cursor);
+                        // check if line contains a selection
                         if line_end_char > start && line_start_char <= end {
                             current_selections.push([start, end]);
                         }
@@ -211,6 +215,7 @@ impl App {
                                 break;
                             }
                         }
+                        // check visual block range
                         if !in_select_rng {
                             if let Some(rng) = &visual_block_rng {
                                 let y_rng = rng.y_rng[0]..=rng.y_rng[1];
