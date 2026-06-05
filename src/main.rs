@@ -29,6 +29,8 @@ mod trie;
 pub mod types;
 mod undo;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 const HIGHLIGHT_DURATION: u64 = 150;
 const SCROLL_OFFSET: usize = 10;
 
@@ -53,6 +55,13 @@ fn main() -> color_eyre::Result<()> {
 }
 
 impl App {
+    fn save_file_extension(&mut self) {
+        if let Some(ext) = std::path::Path::new(&self.path).extension() {
+            if let Some(ext_str) = ext.to_str() {
+                self.file_extension = ext_str.to_string();
+            }
+        }
+    }
     fn file_position(&self) -> String {
         let y = if self.mode == Mode::Command {
             self.cursor_pos.preferred_y
@@ -108,6 +117,8 @@ impl App {
         self.highlight.syntax_set = SyntaxSet::load_defaults_newlines();
         self.highlight.theme_set = ThemeSet::load_defaults();
 
+        self.save_file_extension();
+
         while self.mode != Mode::Exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
@@ -116,7 +127,6 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let draw_time = std::time::Instant::now();
         let mut visual_block_rng = None;
         let mut highlight_text = false;
         if self.highlight_yank {
@@ -162,17 +172,18 @@ impl App {
         let end_line_idx = (start_line_idx + height).min(self.rope.len_lines());
         self.lines_in_view = [start_line_idx, end_line_idx];
 
-        let syntax = self
+        let mut h = None;
+        if let Some(syntax) = self
             .highlight
             .syntax_set
-            .find_syntax_by_extension("rs")
-            .unwrap();
-        let mut h = HighlightLines::new(
-            syntax,
-            &self.highlight.theme_set.themes["base16-ocean.dark"],
-        );
+            .find_syntax_by_extension(&self.file_extension)
+        {
+            h = Some(HighlightLines::new(
+                syntax,
+                &self.highlight.theme_set.themes["base16-ocean.dark"],
+            ));
+        }
 
-        let create_lines_time = std::time::Instant::now();
         // convert rope slice to ratatui line
         let mut lines = Vec::new();
         let mut line_nums = vec![];
@@ -263,19 +274,23 @@ impl App {
                     lines.push(Line::from(line_of_spans));
                 } else {
                     let line_str = rope_line.to_string();
-                    let ranges: Vec<(SyntectStyle, &str)> = h
-                        .highlight_line(&line_str, &self.highlight.syntax_set)
-                        .unwrap();
-                    let mut spans = vec![];
-                    for (syntect_style, content) in ranges {
-                        let r = syntect_style.foreground.r;
-                        let g = syntect_style.foreground.g;
-                        let b = syntect_style.foreground.b;
-                        let style = Style::new().fg(Color::Rgb(r, g, b));
-                        let span = Span::styled(content.to_string(), style);
-                        spans.push(span);
+                    if let Some(hi) = &mut h {
+                        let ranges: Vec<(SyntectStyle, &str)> = hi
+                            .highlight_line(&line_str, &self.highlight.syntax_set)
+                            .unwrap();
+                        let mut spans = vec![];
+                        for (syntect_style, content) in ranges {
+                            let r = syntect_style.foreground.r;
+                            let g = syntect_style.foreground.g;
+                            let b = syntect_style.foreground.b;
+                            let style = Style::new().fg(Color::Rgb(r, g, b));
+                            let span = Span::styled(content.to_string(), style);
+                            spans.push(span);
+                        }
+                        lines.push(Line::from(spans));
+                    } else {
+                        lines.push(Line::from(line_str));
                     }
-                    lines.push(Line::from(spans));
                 }
 
                 // generate line numbers
@@ -298,11 +313,7 @@ impl App {
             }
         }
 
-        eprintln!("lines time: {:?}", create_lines_time.elapsed());
-
         self.highlight_yank = false;
-
-        let create_nums_time = std::time::Instant::now();
 
         let n = self.rope.len_lines();
         let digits = if n == 0 { 1 } else { n.ilog10() + 2 };
@@ -321,8 +332,6 @@ impl App {
         } else {
             self.cursor_pos.y.saturating_sub(self.top_line)
         };
-
-        eprintln!("line nums time: {:?}", create_nums_time.elapsed());
 
         // content of status bar
         let text_content = Text::from(lines);
@@ -393,29 +402,24 @@ impl App {
                 )),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled(":e <file>", Style::default().fg(Color::Magenta)),
-                    Span::raw("     open a file"),
+                    Span::styled(":w <file>", Style::default().fg(Color::Magenta)),
+                    Span::raw("     write a file"),
                 ]),
                 Line::from(vec![
                     Span::styled(":q", Style::default().fg(Color::Magenta)),
                     Span::raw("            quit"),
                 ]),
                 Line::from(vec![
-                    Span::styled("<space>f", Style::default().fg(Color::Magenta)),
-                    Span::raw("      search directory"),
-                ]),
-                Line::from(vec![
-                    Span::styled(":help", Style::default().fg(Color::Magenta)),
-                    Span::raw("         open help docs"),
+                    Span::styled(":wq", Style::default().fg(Color::Magenta)),
+                    Span::raw("           write and quit"),
                 ]),
                 Line::from(""),
-                Line::from(Span::styled("v0.2.0", Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled(VERSION, Style::default().fg(Color::DarkGray))),
             ];
 
             let para = Paragraph::new(lines);
             frame.render_widget(para, area);
         }
-        eprintln!("draw time: {:?}", draw_time.elapsed());
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -511,7 +515,9 @@ impl App {
                                         self.exit();
                                         return;
                                     }
-                                    _ => {}
+                                    _ => {
+                                        self.save_file_extension();
+                                    }
                                 }
                             }
                             _ => {}
@@ -1318,7 +1324,6 @@ impl App {
                         cursor_target_idx = self.rope.line_to_char(self.cursor_pos.preferred_y)
                             + self.cursor_pos.preferred_x;
                     }
-                    eprintln!("cursor_target_idx {}", cursor_target_idx);
                     self.redo_vec.push(a);
                 }
             }
@@ -1485,11 +1490,6 @@ impl App {
             self.cursor_pos.preferred_y = self.cursor_pos.y;
         }
 
-        eprintln!(
-            "preferred x, y: {}, {}",
-            self.cursor_pos.preferred_x, self.cursor_pos.preferred_y
-        );
-
         // check for matching bracket
         self.matching_bracket_idx = find_matching_bracket(self.get_char_idx(), &self.rope);
 
@@ -1626,8 +1626,6 @@ impl App {
     fn scroll(&mut self, target_y: usize) {
         let offset = SCROLL_OFFSET;
         let height = self.main_height - 1 - offset;
-        // don't let cursor go beyond file length
-        // self.cursor_pos.y = target_y.min(self.rope.len_lines().saturating_sub(2));
 
         if target_y.saturating_sub(self.top_line) >= height {
             // scroll down

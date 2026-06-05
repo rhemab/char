@@ -30,6 +30,7 @@ pub struct App {
     pub rope: Rope,
     pub command_bar: String,
     pub path: String,
+    pub file_extension: String,
     pub selections: Vec<VisualSelection>,
     pub yank_buffer: HashMap<char, YankBuffer>,
     pub highlight_yank: bool,
