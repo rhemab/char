@@ -2,6 +2,11 @@
 name = "char"
 version = "0.2.0"
 edition = "2024"
+license = "MIT"
+description = "A fast, minimal text editor inspired by vim."
+repository = "https://github.com/rhemab/char"
+readme = "README.md"
+keywords = ["cli", "terminal", "tui", "editor", "ratatui"]
 
 [dependencies]
 color-eyre = "0.6.5"
@@ -15,3 +20,7 @@ codegen-units = 1
 lto = true 
 opt-level = 3 
 strip = true 
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
