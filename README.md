@@ -19,3 +19,17 @@ The high-level ambitious plan for the project, in order:
 |  4  | LSP                                                     |   ❌   |
 |  5  | Config file                                             |   ❌   |
 
+## Installation
+
+### Install via Script
+
+**Linux and macOS:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rhemab/char/main/install.sh | sh
+```
+
+### Install via Cargo
+```sh
+cargo install char --locked
+```
