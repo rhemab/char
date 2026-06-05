@@ -1,4 +1,4 @@
-# char _
+# char
 
 A vim-like text editor with pleasant defaults and zero required configuration.
 
