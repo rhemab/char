@@ -26,14 +26,14 @@ esac
 # Get latest release tag from GitHub
 TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
 
-ARCHIVE="${BIN_NAME}-${TARGET}.tar.gz"
+ARCHIVE="${BIN_NAME}-${TARGET}.tar.xz"
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE}"
 
 echo "Downloading ${BIN_NAME} ${TAG} for ${TARGET}..."
 curl -fsSL "$URL" -o "/tmp/${ARCHIVE}"
 
 echo "Extracting..."
-tar -xzf "/tmp/${ARCHIVE}" -C /tmp
+tar -xJf "/tmp/${ARCHIVE}" -C /tmp
 
 echo "Installing to ${INSTALL_DIR}..."
 sudo mv "/tmp/${BIN_NAME}" "${INSTALL_DIR}/"
