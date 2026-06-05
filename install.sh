@@ -36,7 +36,7 @@ echo "Extracting..."
 tar -xJf "/tmp/${ARCHIVE}" -C /tmp
 
 echo "Installing to ${INSTALL_DIR}..."
-sudo mv "/tmp/${BIN_NAME}" "${INSTALL_DIR}/"
+sudo mv "/tmp/${ARCHIVE}" "${INSTALL_DIR}/${BIN_NAME}"
 sudo chmod +x "${INSTALL_DIR}/${BIN_NAME}"
 
 rm "/tmp/${ARCHIVE}"
