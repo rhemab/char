@@ -520,6 +520,17 @@ impl App {
                                     }
                                 }
                             }
+                            (Some(":e") | Some(":edit"), arg) => {
+                                if let Some(path) = arg {
+                                    if let Ok(file) = fs::File::open(&path) {
+                                        // add file to new rope
+                                    } else {
+                                        // create new file
+                                    }
+                                } else {
+                                    // create new buffer
+                                }
+                            }
                             _ => {}
                         }
                         if self.mode == Mode::Search {

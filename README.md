@@ -15,9 +15,9 @@ The high-level ambitious plan for the project, in order:
 | :-: | ------------------------------------------------------- | :----: |
 |  1  | Vim motions                                             |   ✅   |
 |  2  | Syntax Highlighting                                     |   ✅   |
-|  3  | Colorschemes                                            |   ❌   |
-|  4  | LSP                                                     |   ❌   |
-|  5  | Config file                                             |   ❌   |
+|  3  | Multiple Buffers                                        |   ❌   |
+|  4  | Config file                                             |   ❌   |
+|  5  | Colorschemes                                            |   ❌   |
 
 ## Installation
 
