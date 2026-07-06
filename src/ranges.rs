@@ -812,8 +812,9 @@ pub fn matching_bracket_idx(cursor_pos: &CursorPos, char_idx: usize, rope: &Rope
 /// Takes a char index and a rope and checks the token of the char at the current index.
 /// If the token is a bracket, it returns the matching bracket index, otherwise it returns None.
 pub fn find_matching_bracket(char_idx: usize, rope: &Rope) -> Option<usize> {
-    let token = rope.char(char_idx);
     let mut idx = char_idx;
+    let mut chars = rope.get_chars_at(idx)?;
+    let token = chars.next()?;
     let opening;
     let closing;
 
@@ -831,8 +832,7 @@ pub fn find_matching_bracket(char_idx: usize, rope: &Rope) -> Option<usize> {
         // search forwards
         let mut count = 0;
         idx += 1;
-        while idx < rope.len_chars() - 1 {
-            let c = rope.char(idx);
+        while let Some(c) = chars.next() {
             if c == opening {
                 count += 1;
             } else if c == closing {
@@ -846,10 +846,10 @@ pub fn find_matching_bracket(char_idx: usize, rope: &Rope) -> Option<usize> {
         }
     } else if token == closing {
         // search backwards
+        chars.prev();
         let mut count = 0;
-        while idx > 0 {
+        while let Some(c) = chars.prev() {
             idx -= 1;
-            let c = rope.char(idx);
             if c == closing {
                 count += 1;
             } else if c == opening {

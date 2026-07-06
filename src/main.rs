@@ -531,6 +531,15 @@ impl App {
                                     // create new buffer
                                 }
                             }
+                            // jump to line
+                            (Some(cmd), _) => {
+                                if cmd.len() > 1 {
+                                    if let Ok(n) = cmd[1..].parse::<usize>() {
+                                        self.cursor_pos.preferred_y =
+                                            n.min(self.rope.len_lines()).saturating_sub(1);
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                         if self.mode == Mode::Search {
@@ -549,7 +558,6 @@ impl App {
                         self.cursor_pos.y = self.cursor_pos.preferred_y;
                         self.cursor_pos.x = self.cursor_pos.preferred_x;
                         self.return_to_normal_mode();
-                        self.scroll(self.cursor_pos.y);
 
                         // replace all
                         if self.command_bar.starts_with(":%s/") {
